@@ -3,6 +3,7 @@
 # library 
 library(dada2)
 library(dplyr)
+library(argparser)
 
 # parameter input
 parser <- arg_parser("filter trimmed fq by dada2") %>%
