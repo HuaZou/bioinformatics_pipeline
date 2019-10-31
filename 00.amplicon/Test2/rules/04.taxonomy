@@ -1,0 +1,10 @@
+rule taxonomy:
+    input:
+        os.path.join(config["results"]["table"], "rep-seqs.qza")
+        
+
+
+qiime tools import \
+--type FeatureData[Sequence] \
+--input-path /usr/local/share/SILVA_databases/SILVA_128_QIIME_release/rep_set/rep_set_18S_only/99/99_otus_18S.fasta \
+--output-path 99_otus_18S

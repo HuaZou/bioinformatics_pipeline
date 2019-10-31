@@ -1,0 +1,32 @@
+"""
+Author: Hua Zou
+Aim: A workflow to process paired-end stranded amplicon sequence by Snakemake.
+Date: July 30 2019
+Run: snakemake -s Snakefile
+"""
+import os
+import sys
+import shutil
+import pandas as pd
+
+configfile: "config.yaml"
+
+samples = pd.read_csv(config["samples"], sep="\t", index_col=["sample"])
+
+
+rule all:
+    input:
+        expand("{taxonomy}/taxonomy.{{ref}}.{{type}}.{res}", 
+                        taxonomy=config["results"]["taxonomy"],
+                        ref=["sliva", "RDP"], 
+                        type=["cluster","unoise3"],
+                        res=["biom","mothur","txt"])
+
+include: "rules/00.fastqc.snk"
+include: "rules/01.trim.snk"
+include: "rules/02.deredundancy.snk"
+include: "rules/03.clusterOTU.snk"
+include: "rules/04.rechimeras.snk"
+include: "rules/05.OTUtable.snk" 
+include: "rules/06.assign_taxonomy.snk"
+include: "rules/07.picrust.snk" 

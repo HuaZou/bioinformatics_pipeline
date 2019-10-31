@@ -1,0 +1,43 @@
+rule stringtie:
+    input:
+        expand("{align}/{{sample}}.sorted.bam",
+                align=config["results"]["alignment"],  
+                sample=samples.index)
+    output:
+        transcript =  temp(os.path.join(config["results"]["expression"], 
+                            "{sample}", "{sample}.transcripts.gtf")),
+        abundance  =  temp(os.path.join(config["results"]["expression"],
+                            "{sample}", "{sample}.gene_abundances.tsv"))
+    params:
+        gtf     = config["params"]["expression"]["gtf"],
+        threads = config["params"]["expression"]["threads"]
+    log:
+        os.path.join(config["logs"], "04.expression.{sample}.log")
+    shell:
+        '''
+        stringtie -p {params.threads} -G {params.gtf} -e -B \
+            -o {output.transcript} -A {output.abundance} {input} 2>{log}
+        '''
+
+rule normalization:
+    output:
+        transcript = expand("{expression}/All_transcripts_{{method}}.tsv",
+                            expression=config["results"]["expression"],
+                            method=["TPM","FPKM","Coverage"]),
+        abundance  = expand("{expression}/All_gene_abundances_{{method}}.tsv",
+                            expression=config["results"]["expression"])
+    params:
+        inputdir = ",".join(expand("{expression}/{sample}/", 
+                    expression=config["results"]["expression"],
+                    sample=samples.index)),
+        metric   = "{method}",
+        script   = config["params"]["expression"]["script"]
+    log:
+        os.path.join(config["logs"], "04.expression.{method}.log")
+    shell:
+        '''
+        perl {params.script} --expression_metric={params.metric} \
+            --result_dirs={params.inputdir} \
+            --transcript_matrix_file={output.transcript} \
+            --gene_matrix_file={output.abundance} 2>{log}
+        '''

@@ -1,0 +1,22 @@
+rule assign_taxonomy:
+    input:
+        otu_ref = expand("{rechimeras}/OTU.rechimera_{{ref}}.{{type}}.fa", 
+                        rechimeras=config["results"]["rechimeras"],
+                        ref=["sliva", "RDP"], 
+                        type=["cluster","unoise3"])
+    output:
+        biom   = os.path.join(config["results"]["taxonomy"], "taxonomy.{ref}.{type}.biom"),
+        mothur = os.path.join(config["results"]["taxonomy"], "taxonomy.{ref}.{type}.mothur"),
+        txt    = os.path.join(config["results"]["taxonomy"], "taxonomy.{ref}.{type}.txt")
+    params:
+        identity = config["params"]["taxonomy"]["identity"],
+        threads  = config["params"]["taxonomy"]["threads"],
+        database = config["params"]["taxonomy"]["silva"]
+    log:
+        os.path.join(config["logs"], "06.taxonomy.{ref}.{type}.log")
+    shell:
+        '''
+        vsearch --usearch_global {input.otu_ref} --db {params.database} \
+                --biomout {output.biom} --mothur_shared_out {output.mothur} --otutabout {output.txt} \
+                --id {params.identity} --threads {params.threads} 2>{log}
+        '''

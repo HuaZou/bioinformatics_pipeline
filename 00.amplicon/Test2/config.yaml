@@ -1,0 +1,42 @@
+samples: "Sample_path.tsv"
+
+params:
+  trim:
+    left_primer:  "CMGGGTATCTAATCCKGTT"
+    right_primer: "GGAAGGTGGGGATGACGT"
+    max_err_rate: 0.1
+    overlap:      5
+    minLen:       250
+    script:       "scripts/generate_qiime2_config.py"
+  fastq2qza:
+    type:   "SampleData[PairedEndSequencesWithQuality]"
+    format: "PairedEndFastqManifestPhred33V2"
+  table:
+    leftf:    5
+    leftr:    5
+    lenf:     220
+    lenr:     180
+    threads:  4
+  diversity:
+    depth:  30000
+    group:  "genotype"
+  taxonomy:
+    silva:    "database/silva-132-99-515-806-nb-classifier.qza"
+    identity: 0.97
+    threads:  4
+    perl:     "scripts/extract_taxonomy.pl"
+
+  
+results:
+  quality:        
+    fastqc:   "result/00.quality/fastqc"
+    multiqc:  "result/00.quality/multiqc"
+  trim:       "result/01.trimmed"
+  fastq2qza:  "result/02.fastq2qza"
+  table:      "result/03.table"
+  tree:       "result/04.tree"
+  diversity:  "result/05.diversity"
+  taxonomy:   "result/05.taxonomy"
+
+  
+logs: "result/logs"

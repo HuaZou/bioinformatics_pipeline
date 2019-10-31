@@ -1,0 +1,52 @@
+rule dada2:
+    input:
+        os.path.join(config["results"]["fastq2qza"], "qiime2.trimmed.qza")
+    output:
+        repre = os.path.join(config["results"]["table"], "rep_seqs.dada2.qza"),
+        table = os.path.join(config["results"]["table"], "table.dada2.qza"),
+        stats = os.path.join(config["results"]["table"], "stats.dada2.qza")
+    params:
+        leftf    = config["params"]["table"]["leftf"],
+        leftr    = config["params"]["table"]["leftr"],
+        lenf     = config["params"]["table"]["lenf"],
+        lenr     = config["params"]["table"]["lenr"],
+        threads  = config["params"]["table"]["threads"],
+        outdir   = os.path.join(config["results"]["table"], "temp") 
+    log:
+        os.path.join(config["logs"], "03.dada2.log") 
+    shell:
+        '''
+        qiime dada2 denoise-paired \
+            --i-demultiplexed-seqs {input} \
+            --p-trim-left-f {params.leftf} \
+            --p-trim-left-r {params.leftr} \
+            --p-trunc-len-f {params.lenf} \
+            --p-trunc-len-r {params.lenr} \
+            --p-n-threads {params.threads} \
+            --o-representative-sequences {output.repre} \
+            --o-table {output.table} \
+            --o-denoising-stats {output.stats} \
+            --output-dir {params.outdir} 2>{log}
+        '''
+
+rule feature_table:
+    input:
+        os.path.join(config["results"]["table"], "table.dada2.qza")
+    output:
+        os.path.join(config["results"]["table"], "table.dada2.qzv")
+    log:
+        os.path.join(config["logs"], "03.dada2.visual.log")
+    shell:
+        ''' 
+        qiime feature-table summarize --i-table {input} --o-visualization {output}
+        '''
+
+rule table_biom:
+    input:
+        os.path.join(config["results"]["table"], "table.dada2.qza")
+    output:
+        os.path.join(config["results"]["table"], "biom")
+    shell:
+        '''
+        qiime tools export --input-path {input} --output-path {output}
+        '''

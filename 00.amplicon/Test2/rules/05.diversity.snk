@@ -1,0 +1,80 @@
+rule diversity_core_metrics:
+    input:
+        tree     = os.path.join(config["results"]["tree"], "rooted_tree.qza"),
+        table    = os.path.join(config["results"]["table"], "table.dada2.qza"),
+        metadata = config["samples"]
+    output:
+        dir = config["results"]["diversity"]
+    params:
+        depth = config["params"]["diversity"]["depth"]
+    log:
+        os.path.join(config["logs"], "05.diversity_metrics.log")
+    shell:
+        '''
+        qiime diversity core-metrics-phylogenetic \
+            --i-phylogeny {input.tree} \
+            --i-table {input.table} \
+            --p-sampling-depth {params.depth} \
+            --m-metadata-file {input.metadata} \
+            --output-dir {output} 2>{log}
+        ''' 
+
+rule diversity_rarefaction:
+    input:
+        tree     = os.path.join(config["results"]["tree"], "rooted_tree.qza"),
+        table    = os.path.join(config["results"]["table"], "table.dada2.qza"),
+        metadata = config["samples"]
+    output:
+        os.path.join(config["results"]["diversity"], "alpha-rarefaction.qzv")
+    params:
+        depth = config["params"]["diversity"]["depth"]
+    log:
+        os.path.join(config["logs"], "05.diversity_rarefaction.log")
+    shell:
+        '''
+        qiime diversity core-metrics-phylogenetic \
+            --i-phylogeny {input.tree} \
+            --i-table {input.table} \
+            --p-max-depth {params.depth} \
+            --m-metadata-file {input.metadata} \
+            --o-visualization {output} 2>{log}
+        '''
+
+rule alpha_significance:
+    input:
+        alpha = expand("{core}/{{typea}}.qza",
+                    core=config["results"]["diversity"],
+                    typea=["faith_pd_vector", "evenness_vector"]),
+        metadata = config["samples"]
+    output:
+        os.path.join(config["results"]["diversity"], "{typea}.group_significance.qzv")
+    log:
+        os.path.join(config["logs"], "05.diversity_{typea}.log")
+    shell:
+        '''
+        qiime diversity alpha-group-significance \
+            --i-alpha-diversity {input.alpha} \
+            --m-metadata-file {input.metadata} \
+            --o-visualization {output} 2>{log}
+        '''
+
+rule beta_diversity:
+    input:
+        beta    =expand("{core}/{{typeb}}.qza",
+                    core=config["results"]["diversity"],
+                    typeb=["unweighted_unifrac_distance_matrix", "bray_curtis_pcoa_results"]),
+        metadata = config["samples"]
+    output:
+        os.path.join(config["results"]["diversity"], "{typeb}.group_significance.qzv")
+    params:
+        group = config["params"]["diversity"]["group"]
+    log:
+        os.path.join(config["logs"], "05.diversity_{typeb}.log")
+    shell:
+        '''
+        qiime diversity beta-group-significance \
+            --i-beta-diversity {input.beta} \
+            --m-metadata-file {input.metadata} \
+            --m-metadata-colum {params.group} \
+            --o-visualization {output} 2>{log}
+        ''' 

@@ -1,0 +1,44 @@
+rule splice_ref:
+    input:
+        ref = config["params"]["index"]["gtf"]
+    output:
+        temp(os.path.join(config["results"]["index"], "{filename}.splice.tsv"))
+    log:
+        os.path.join(config["logs"], "02.index.splice.{filename}.log")
+    shell:
+        '''
+        hisat2_extract_splice_sites.py {input.ref} > {output}  2>{log}
+        '''
+
+rule exon_ref:
+    input:
+        ref = config["params"]["index"]["gtf"]
+    output:
+        temp(os.path.join(config["results"]["index"], "{filename}.exon.tsv"))
+    log:
+        os.path.join(config["logs"], "02.index.exon.{filename}.log")
+    shell:
+        '''
+        hisat2_extract_exons.py {input.ref} > {output}  2>{log}
+        '''
+
+rule index:
+    input:
+        splice = os.path.join(config["results"]["index"], "{filename}.splice.tsv"),
+        exon   = os.path.join(config["results"]["index"], "{filename}.exon.tsv")
+    output:
+        expand("{index}/{{filename}}.{num}.ht2",
+                index=config["results"]["index"],
+                num=[1,2,3,4])
+    params:
+        fa      = config["params"]["index"]["fasta"],
+        prefix  = os.path.join(config["results"]["index"], "{filename}"),
+        threads = config["params"]["index"]["threads"]
+    log:
+        os.path.join(config["logs"], "02.index.hisat2_bulid.{filename}.log")
+    shell:
+        '''
+        hisat2-build -p {params.threads} \
+            --ss {input.splice} --exon {input.exon} \
+            {params.fa} {params.prefix}   2>{log}
+        '''

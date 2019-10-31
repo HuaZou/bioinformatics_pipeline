@@ -1,0 +1,64 @@
+rule normalize:
+    input:
+        expand("{rechimeras}/OTU.rechimera_{{ref}}.{{type}}.fa", 
+                rechimeras=config["results"]["rechimeras"],
+                ref=["sliva", "RDP"], 
+                type=["cluster","unoise3"])
+    output:
+        os.path.join(config["results"]["picrust"], "picrust.{ref}.{type}.biom")
+    log:
+        os.path.join(config["logs"], "05.picrust.{ref}.{type}.log")
+    shell:
+        '''
+        source activate /ldfssz1/ST_META/share/User/zouhua/anaconda3/envs/py27; \
+        normalize_by_copy_number.py -i {input} -o {output} 2>{log}; \
+        conda deactivate
+        '''
+
+rule predict_ko:
+	input: 
+        rules.normalize.output
+	output: 
+        os.path.join(config["results"]["picrust"], "picrust.{ref}.{type}.predictions_ko.biom")
+	shell:
+        '''
+        source activate /ldfssz1/ST_META/share/User/zouhua/anaconda3/envs/py27; \
+        predict_metagenomes.py -i {input} -o {output} -t ko -a ko_nsti_scores.txt " \
+        conda deactivate
+        '''
+
+rule predict_cog:
+	input: 
+        rules.normalize.output
+	output: 
+        os.path.join(config["results"]["picrust"], "picrust.{ref}.{type}.predictions_cog.biom")
+	shell:
+        '''
+        source activate /ldfssz1/ST_META/share/User/zouhua/anaconda3/envs/py27; \
+        predict_metagenomes.py -i {input} -o {output} -t cog -a ko_nsti_scores.txt --with_confidence"; \
+        conda deactivate
+        '''
+
+rule predict_rfam:
+	input: 
+        rules.normalize.output
+	output:
+        os.path.join(config["results"]["picrust"], "picrust.{ref}.{type}.predictions_rfam.biom")
+	shell:
+        '''
+        source activate /ldfssz1/ST_META/share/User/zouhua/anaconda3/envs/py27; \
+        predict_metagenomes.py -i {input} -o {output} -t rfam -a ko_nsti_scores.txt --with_confidence"; \
+        conda deactivate
+        '''
+
+rule categorize_ko:
+	input: 
+        rules.predict_ko.output
+	output:
+        os.path.join(config["results"]["picrust"], "picrust.{ref}.{type}.predictions_ko_L3.biom")
+	shell:
+        '''
+        source activate /ldfssz1/ST_META/share/User/zouhua/anaconda3/envs/py27; \
+        categorize_by_function.py -i {input} -c KEGG_Pathways -l 3 -o {output}"; \
+        conda deactivate
+        '''

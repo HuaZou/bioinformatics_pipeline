@@ -1,0 +1,29 @@
+rule dereplicate:
+    input:
+        os.path.join(config["results"]["trim"], "summary_trimmed.fa")
+    output:
+        temp(os.path.join(config["results"]["deredundancy"], "deredundancy.fa"))
+    params:
+        name = config["params"]["deredundancy"]["name"],
+        mins = config["params"]["deredundancy"]["mins"]
+    log:
+        os.path.join(config["logs"], "02.deredundancy.log")
+    shell:
+        '''
+        vsearch --derep_fulllength {input} --output {output} --relabel {params.name} \
+            --minuniquesize {params.mins} --sizeout 2>{log}
+        '''
+
+rule Discard_singletons:
+    input:
+        os.path.join(config["results"]["deredundancy"], "deredundancy.fa")
+    output:
+        os.path.join(config["results"]["deredundancy"], "sorted.fa")
+    params:
+        size = config["params"]["deredundancy"]["size"]
+    log:
+        os.path.join(config["logs"], "02.sorted.log")
+    shell:
+        '''
+        vsearch --sortbysize {input} --output {output} --minsize {params.size} 2>{log}
+        '''

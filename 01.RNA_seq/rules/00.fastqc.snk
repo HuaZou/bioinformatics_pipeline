@@ -1,0 +1,38 @@
+def get_fastq(wildcards, samples, read_pair="fq1"):
+    return samples.loc[wildcards.sample, [read_pair]][0]
+
+rule fastqc:
+    input:
+        read1 = lambda wildcards: get_fastq(wildcards, samples, "fq1"),
+        read2 = lambda wildcards: get_fastq(wildcards, samples, "fq2")
+    output:
+        outfile = expand("{fastqc}/{{sample}}_{read}_fastqc.{out}",
+                        fastqc=config["results"]["quality"]["fastqc"],
+                        read=["1", "2"],
+                        out=["html", "zip"])
+    params:
+        outdir = config["results"]["quality"]["fastqc"]
+    log:
+        os.path.join(config["logs"], "00.quality_fastqc_{sample}.log")
+    shell:
+        '''
+        fastqc -f fastq {input.read1} {input.read2} -o {params.outdir} 2>{log}
+        '''
+
+rule multiqc:
+    input:
+        expand("{fastqc}/{sample}_{read}_fastqc.zip",
+                fastqc=config["results"]["quality"]["fastqc"],
+                sample=samples.index,
+                read=["1", "2"])
+    output:
+        html = os.path.join(config["results"]["quality"]["multiqc"], "fastqc_multiqc_report.html"),
+        data_dir = directory(os.path.join(config["results"]["quality"]["multiqc"], "fastqc_multiqc_report_data"))
+    params:
+        outdir = config["results"]["quality"]["multiqc"]
+    log:
+        os.path.join(config["logs"], "00.quality__multiqc.log")
+    shell:
+        '''
+        multiqc --title fastqc --module fastqc {input} --outdir {params.outdir}  2> {log}
+        '''

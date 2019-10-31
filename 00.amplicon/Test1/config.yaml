@@ -1,0 +1,46 @@
+samples: "Sample_path.tsv"
+
+params:
+  trim:
+    left_primer:  29
+    right_primer: 18
+    max_err_rate: 0.01
+    maxns:        0
+  deredundancy:
+    name: "OTU_"
+    mins: 8
+    size: 2
+  clusterOTU:
+    name:     "OTU_"
+    identity: 0.98
+    threads:  2
+  rechimeras:
+    silva: "database/silva_16s_v123.fa"
+    rdp:   "database/rdp_16s_v16_sp.fa"
+    green: "database/gg_16s_13.5.fa"
+    utax:  "database/utax_reference_dataset_22.08.2016.fasta"
+  OTUtable:
+    identity: 0.97
+    threads:  3
+    accepts:  4
+    rejects:  8
+  taxonomy:
+    silva:    "database/silva_16s_v123.fa"
+    identity: 0.97
+    threads:  4
+
+  
+results:
+  quality:        
+    fastqc:       "result/00.quality/fastqc"
+    multiqc:      "result/00.quality/multiqc"
+  trim:           "result/01.trimmed"   
+  deredundancy:   "result/02.deredundancy"   
+  clusterOTU:     "result/03.clusterOTU"
+  rechimeras:     "result/04.rechimeras"
+  OTUtable:       "result/05.OTUtable"
+  taxonomy:       "result/06.taxonomy"
+  picrust:        "result/07.picrust"
+
+
+logs: "result/logs"

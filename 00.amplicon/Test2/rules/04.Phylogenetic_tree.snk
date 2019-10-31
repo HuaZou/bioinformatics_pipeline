@@ -1,0 +1,47 @@
+rule mafft:
+    input:
+        os.path.join(config["results"]["table"], "rep_seqs.dada2.qza")
+    output:
+        os.path.join(config["results"]["tree"], "aligned_rep_seqs.qza")
+    log:
+        os.path.join(config["logs"], "04.alignment_mafft.log")
+    shell:
+        '''
+        qiime alignment mafft --i-sequences {input} --o-alignment {output}
+        ''' 
+
+rule mask:
+    input:
+        os.path.join(config["results"]["tree"], "aligned_rep_seqs.qza")
+    output:
+        os.path.join(config["results"]["tree"], "masked_aligned_rep_seqs.qza")
+    log:
+        os.path.join(config["logs"], "04.alignment_mask.log")
+    shell:
+        '''
+        qiime alignment mask --i-alignment {input} --o-masked-alignment {output}
+        ''' 
+
+rule fasttree:
+    input:
+        os.path.join(config["results"]["tree"], "masked_aligned_rep_seqs.qza")
+    output:
+        os.path.join(config["results"]["tree"], "unrooted_tree.qza")
+    log:
+        os.path.join(config["logs"], "04.fasttree.log")
+    shell:
+        '''
+        qiime phylogeny fasttree --i-alignment {input} --o-tree {output}
+        ''' 
+
+rule midpoint_root:
+    input:
+        os.path.join(config["results"]["tree"], "unrooted_tree.qza")
+    output:
+        os.path.join(config["results"]["tree"], "rooted_tree.qza")
+    log:
+        os.path.join(config["logs"], "04.midpoint_tree.log")
+    shell:
+        '''
+        qiime phylogeny midpoint-root --i-tree {input} --o-rooted-tree {output}
+        ''' 

@@ -1,0 +1,24 @@
+rule fastq2qza:
+    input:
+        os.path.join(config["results"]["trim"], "Sample_path.qiime2.tsv")
+    output:
+        os.path.join(config["results"]["fastq2qza"], "qiime2.trimmed.qza")
+    params:
+        type    = config["params"]["fastq2qza"]["type"],
+        format  = config["params"]["fastq2qza"]["format"]
+    log:
+        os.path.join(config["logs"], "02.fastq2qza.log")
+    shell:
+        '''
+        qiime tools import --type '{params.type}' --input-path {input} --output-path {output} --input-format {params.format}
+        '''
+
+rule qza_visualization:
+    input:
+        os.path.join(config["results"]["fastq2qza"], "qiime2.trimmed.qza")
+    output:
+        os.path.join(config["results"]["fastq2qza"], "qiime2.trimmed.qzv")
+    shell:
+        '''
+        qiime demux summarize --i-data {input} --o-visualization {output}
+        '''
