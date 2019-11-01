@@ -1,0 +1,7 @@
+sample_ID	group_ID
+N1	N
+N2	N
+N3	N
+C1	C
+C2	C
+C3	C
