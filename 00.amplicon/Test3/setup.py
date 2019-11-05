@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+\#!/usr/bin/env python
 
 import argparse as ap 
 import sys, os, re 
@@ -211,30 +211,19 @@ def Infer_feature_tax(dir_dict, cfg_dict):
 
 	return "OK"
 
-""""
 ######################################################
 # step5: format output types and summary pipeline
 ######################################################
-def Infer_feature_tax(dir_dict, cfg_dict):
-	filt_read_dir = dir_dict['filt']
-	dada_dir	  = dir_dict['dada2']
-	tax_dir       = dir_dict['tax']		
-	script_total  = dir_dict['total']
-	database      = cfg_dict['database']
+
+def joint_step(dir_dict):
+	summary_step_file = dir_dict['total'] + "/Run.Total.sh" 
+	with open(summary_step_file, 'w') as sum_f:
+		sum_f.write("sh Run.S1_fastqc.sh\n")
+		sum_f.write("sh Run.S2_cutadapt.sh\n")
+		sum_f.write("sh Run.S3_filter.sh\n")
+		sum_f.write("sh Run.S4_OTU.sh\n")
 
 
-	filtpathF = filt_read_dir + "/FWD"
-	filtpathR = filt_read_dir + "/REV"
-
-	total_dada_file = script_total + "/" + "Run.S4_OTU.sh"
-	total_dada_f = open(total_dada_file, 'w')
-	shell_dada = " ".join(["Rscript", dada2_script, "-f", filtpathF, "-r", filtpathR, \
-				"-o1", dada_dir, "-d", database, "-o2", tax_dir])
-	total_dada_f.write(shell_dada + "\n")
-	total_dada_f.close()
-
-	return "OK"
-"""
 
 ######################################################
 # main: run each step
@@ -276,6 +265,8 @@ def main():
 		print("Step4: Running dada2 succeed")
 	else:
 		print("Step4: Running dada2 failed")
+
+	joint_step(dir_lst)
 
 if __name__ == '__main__':
 	main()

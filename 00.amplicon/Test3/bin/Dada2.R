@@ -1,9 +1,9 @@
 #!/usr/bin/R 
 
-# library 
 library(dada2)
 library(dplyr)
 library(argparser)
+library(ggplot2)
 
 # parameter input
 parser <- arg_parser("filter trimmed fq by dada2") %>%
@@ -29,9 +29,13 @@ filtRs <- file.path(dir_fq2, list.files(dir_fq2))
 errF <- learnErrors(filtFs, multithread=TRUE)
 errR <- learnErrors(filtRs, multithread=TRUE)
 
-plote_prf <- paste(out, "plotError.pdf", sep="/")
+plot_errF <- paste0(out1, "/plotErrorF.pdf")
 plotErrors(errF, nominalQ=TRUE)
-ggave(plote_prf)
+ggsave(plot_errF)
+
+plot_errR <- paste0(out1, "/plotErrorR.pdf")
+plotErrors(errR, nominalQ=TRUE)
+ggsave(plot_errR)
 
 # Sample Inference
 derepF <- derepFastq(filtFs)
@@ -54,3 +58,4 @@ saveRDS(seqtab.nochim, paste0(out1, "/seqtab.nochimera.rds"))
 # assign taxonmy
 tax <- assignTaxonomy(seqtab.nochim, database, multithread=TRUE)
 saveRDS(tax, paste0(out2, "/taxonomy.rds"))
+
