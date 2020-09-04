@@ -1,0 +1,7 @@
+SampleID	forward_adapter	reverse_adapter	Group	Repeat	fq1	fq2
+HBR_Rep1	AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT	AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC	HBR	Repeat1	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/HBR_Rep1.r1.fq.gz	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/HBR_Rep1.r2.fq.gz
+HBR_Rep2	AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT	AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC	HBR	Repeat2	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/HBR_Rep2.r1.fq.gz	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/HBR_Rep2.r2.fq.gz
+HBR_Rep3	AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT	AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC	HBR	Repeat3	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/HBR_Rep3.r1.fq.gz	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/HBR_Rep3.r2.fq.gz
+UHR_Rep1	AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT	AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC	UHR	Repeat1	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/UHR_Rep1.r1.fq.gz	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/UHR_Rep1.r2.fq.gz
+UHR_Rep2	AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT	AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC	UHR	Repeat2	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/UHR_Rep2.r1.fq.gz	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/UHR_Rep2.r2.fq.gz
+UHR_Rep3	AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT	AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC	UHR	Repeat3	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/UHR_Rep3.r1.fq.gz	/disk/user/zouhua/pipeline/RNA_seq/database/Raw_data/UHR_Rep3.r2.fq.gz

@@ -1,7 +1,0 @@
-sample	fq1	fq2
-HBR_Rep1	data/HBR_Rep1.1.fastq.gz	data/HBR_Rep1.2.fastq.gz
-HBR_Rep2	data/HBR_Rep2.1.fastq.gz	data/HBR_Rep2.2.fastq.gz
-HBR_Rep3	data/HBR_Rep3.1.fastq.gz	data/HBR_Rep3.2.fastq.gz
-UHR_Rep1	data/UHR_Rep1.1.fastq.gz	data/UHR_Rep1.2.fastq.gz
-UHR_Rep2	data/UHR_Rep2.1.fastq.gz	data/UHR_Rep2.2.fastq.gz
-UHR_Rep3	data/UHR_Rep3.1.fastq.gz	data/UHR_Rep3.2.fastq.gz
