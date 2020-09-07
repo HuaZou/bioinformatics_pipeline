@@ -1,0 +1,36 @@
+samples: "6samples.path.tsv"
+
+params:
+  index:
+    cpu:  20
+    gtf:  "/disk/user/zouhua/pipeline/RNA_seq/database/chr22_with_ERCC92.gtf"
+    fa :  "/disk/user/zouhua/pipeline/RNA_seq/database/chr22_with_ERCC92.fa"
+  trim:
+    adapter:  "/disk/user/zouhua/pipeline/RNA_seq/database/adapter.fa"
+    quality:          30
+    ao:               5 
+    min_length:       99
+    cpu:              2
+    max_uncalled:     10 
+  quantify:
+    kallisto_index:  "/disk/user/zouhua/pipeline/RNA_seq/database/kallisto_index/Homo_sapiens.GRCh38"
+    salmon_index:    "/disk/user/zouhua/pipeline/RNA_seq/database/salmon_index/Homo_sapiens.GRCh38/"
+    gtf:           "/disk/user/zouhua/pipeline/RNA_seq/database/chr22_with_ERCC92.gtf"
+    threads:       20
+    numBootstraps: 30
+
+  
+result:
+  index:       "kallisto_result/00.index"
+  fastqc:      "kallisto_result/01.fastqc"
+  trim:        "kallisto_result/02.trim"   
+  quantify:    
+    kallisto: "kallisto_result/03.quantify/kallisto"
+    salmon:   "kallisto_result/03.quantify/salmon"   
+
+
+logs:
+  index:       "kallisto_result/logs/00.index"
+  fastqc:      "kallisto_result/logs/01.fastqc"
+  trim:        "kallisto_result/logs/02.trim"
+  quantify:    "kallisto_result/logs/03.quantify"

@@ -1,0 +1,29 @@
+"""
+Author: Hua Zou
+Aim: A workflow to process paired-end stranded RNA-seq sequence by Snakemake.
+Date: July 5 2020
+Email: zouhua1@outlook.com
+Run: snakemake result/05.multiqc/multiqc_report.html --snakefile snakefile_star_pe --cores 20
+"""
+
+import os
+import sys
+import shutil
+import pandas as pd
+
+configfile: "config_star.yaml"
+
+samples = pd.read_csv(config["samples"], sep="\t", index_col=["SampleID"])
+
+rule all:
+    input:
+        os.path.join(config["result"]["multiqc"], 
+                        "multiqc_report.html")
+
+#include: "rules/hisat2_build_index.snk"
+include: "rules/fastqc.snk"
+include: "rules/trim_galore.snk"
+include: "rules/star.snk"
+include: "rules/featureCounts.snk"
+#include: "rules/htseq_Counts.snk"
+include: "rules/multiqc_star.snk" 

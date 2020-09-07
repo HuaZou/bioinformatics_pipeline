@@ -1,3 +1,8 @@
 *.Rhistory
 *.RData
 *.html
+
+.snakemake/
+dataset/
+database/
+*result/
