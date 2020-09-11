@@ -1,0 +1,17 @@
+rule ninja:
+    input:
+        expand("{fq2fa}/{{sample}}_merged.trimmed.fa",
+                        fq2fa=config["result"]["fq2fa"])
+    output:
+        expand("{ninja}/{{sample}}/ninja_otutable.txt",
+                        ninja=config["result"]["ninja"])
+    params:
+        dir    = os.path.join(config["result"]["ninja"], '{sample}'),
+        script = config["params"]["ninja"]["script"],
+        db     = config["params"]["ninja"]["db"]
+    log:
+        os.path.join(config["logs"]["ninja"], "ninja_{sample}.log")
+    shell:
+        '''
+        python {params.script} --input {input} --output {params.dir} --legacy --threads 4 -b {params.db} 2>{log}
+        '''

@@ -1,0 +1,69 @@
+rule merge_pairs:
+    input:
+        read1 = expand("{trim}/{{sample}}_1_trimmed.fq.gz",
+                        trim=config["result"]["trim"]),
+        read2 = expand("{trim}/{{sample}}_2_trimmed.fq.gz",
+                        trim=config["result"]["trim"])
+    output:
+        os.path.join(config["result"]["fq2fa"], "{sample}_merged.fq")
+    params:
+        name = "{sample}."
+    log:
+        os.path.join(config["logs"]["fq2fa"], "fq2fa_{sample}.merge.log")
+    shell:
+        '''
+        vsearch -fastq_mergepairs {input.read1} -reverse {input.read2} \
+            -fastqout {output} -relabel {params.name} 2>{log}
+        '''
+
+"""
+def get_fastq(wildcards, samples, read_pair="fq1"):
+    return samples.loc[wildcards.sample, [read_pair]]
+rule merge_pairs:
+    input:
+        read1 = lambda wildcards: get_fastq(wildcards, samples, "fq1"),
+        read2 = lambda wildcards: get_fastq(wildcards, samples, "fq2")
+    output:
+        os.path.join(config["result"]["fq2fa"], "{sample}_merged.fq")
+    params:
+        name = "{sample}."
+    log:
+        os.path.join(config["logs"]["fq2fa"], "fq2fa_{sample}.merge.log")
+    shell:
+        '''
+        vsearch -fastq_mergepairs {input.read1} -reverse {input.read2} \
+            -fastqout {output} -relabel {params.name} 2>{log}
+        '''
+"""
+
+
+rule filter_fqTofa:
+    input:
+        expand("{fq2fa}/{{sample}}_merged.fq",
+                        fq2fa=config["result"]["fq2fa"])
+    output:
+        temp(expand("{fq2fa}/{{sample}}_merged.temp.fa",
+                        fq2fa=config["result"]["fq2fa"]))
+    params:
+        rate  = config["params"]["fq2fa"]["max_err_rate"],
+        maxns = config["params"]["fq2fa"]["maxns"]
+    log:
+        os.path.join(config["logs"]["fq2fa"], "fq2fa_{sample}.filter.log")
+    shell:
+        '''
+        vsearch --fastx_filter {input} --fastq_maxee_rate {params.rate} --fastq_maxns {params.maxns} --fastaout {output}  2>{log} 
+        '''   
+
+rule multiqc_lines2single_lines:
+    input:
+        temp(expand("{fq2fa}/{{sample}}_merged.temp.fa",
+                        fq2fa=config["result"]["fq2fa"]))
+    output:
+        temp(expand("{fq2fa}/{{sample}}_merged.trimmed.fa",
+                        fq2fa=config["result"]["fq2fa"]))
+    log:
+        os.path.join(config["logs"]["fq2fa"], "fq2fa_{sample}.order.log")  
+    shell:
+        '''
+        seqtk seq {input} > {output}  2>{log} 
+        '''              

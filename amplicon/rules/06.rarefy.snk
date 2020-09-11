@@ -1,0 +1,26 @@
+rule rarefy_otu:
+    input:
+        os.path.join(config["result"]["finaltable"], "OTU.table.tsv"),
+    output:
+        os.path.join(config["result"]["rarefy"], "OTU.table.rarefied.taxa.tsv")
+    params:
+        dir      = config["result"]["rarefy"],
+        temp     = os.path.join(config["result"]["rarefy"], "temp"),
+        temp_out = os.path.join(config["result"]["rarefy"], "temp_out"),
+        bash_src = os.path.join(config["result"]["rarefy"], "batch.rarey.scripts.sh"),
+        otu_rare = os.path.join(config["result"]["rarefy"], "OTU.table.rarefied.tsv"),
+        split    = config["params"]["rarefy"]["split_src"],
+        fast     = config["params"]["finaltable"]["fast_src"],
+        combine  = config["params"]["rarefy"]["cbind_src"],
+        add      = config["params"]["finaltable"]["add_src"],
+        tax_db   = config["params"]["finaltable"]["tax_db"]
+    log:
+        os.path.join(config["logs"]["rarefy"], "rarefy.log")
+    shell:
+        '''
+        Rscript {params.split} {input} 6 {params.temp} 2>{log}
+        find {params.temp} -type f | perl -e 'while(<>){chomp;@a=split/\//;@b=split/\./,$a[-1];print "python ./script/fast.py -rarefy_otu_table -otu $_ -o {params.temp_out}/$b[0].otu.rarefy.tsv  -d 110274 -iter 1000\n";}' > {params.bash_src}
+        cd {params.temp} &&  sh {params.bash_src} 2>>{log}
+        Rscript {params.combine} D {params.temp_out} {params.otu_rare} 2>>{log}
+        python {params.add} {params.otu_rare} {params.tax_db} {out} 2>>{log}
+        '''    

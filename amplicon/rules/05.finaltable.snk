@@ -1,0 +1,23 @@
+rule final_table:
+    input:
+        files = expand("{ninja}/{sampleid}/ninja_otutable.txt",
+                        ninja=config["result"]["ninja"],
+                        sampleid=samples.index)
+    output:
+        otu_tab = os.path.join(config["result"]["finaltable"], "OTU.table.tsv"),
+        otu_sum = os.path.join(config["result"]["finaltable"], "OTU.table.summary.tsv")
+    params:
+        dir      = config["result"]["ninja"], 
+        otu_tax  = os.path.join(config["result"]["finaltable"], "OTU.table.taxa.tsv"),
+        combine  = config["params"]["finaltable"]["cbind_src"],
+        add      = config["params"]["finaltable"]["add_src"],
+        fast     = config["params"]["finaltable"]["fast_src"],
+        tax_db   = config["params"]["finaltable"]["tax_db"]
+    log:
+        os.path.join(config["logs"]["finaltable"], "finaltable.log")
+    shell:
+        '''
+        Rscript {params.combine} D {params.dir} {output.otu_tab} 2>{log} 
+        python {params.add} {output.otu_tab} {params.tax_db} {params.otu_tax} 2>>{log}
+        python {params.fast} -summary_otu_table -otu {output.otu_tab} -o {output.otu_sum} 2>>{log}
+        '''

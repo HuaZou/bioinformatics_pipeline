@@ -1,0 +1,24 @@
+#!/usr/bin/env python
+import os
+import sys
+import shutil
+import pandas as pd
+
+configfile: "config.yaml"
+
+samples = pd.read_csv(config["samples"], sep="\t", index_col=["SampleID"])
+
+rule all:
+    input:
+        #os.path.join(config["result"]["multiqc"], "multiqc_report.html"),
+        os.path.join(config["result"]["finaltable"], "OTU.table.summary.tsv"),
+        os.path.join(config["result"]["fastqc"], "fastqc_multiqc_report.html")
+
+
+include: "rules/01.fastqc.snk"
+include: "rules/02.trim.snk"
+include: "rules/03.fq2fa.snk"
+include: "rules/04.ninja.snk"
+include: "rules/05.finaltable.snk"
+#include: "rules/06.rarefy.snk" 
+#include: "rules/07.multiqc.snk"
