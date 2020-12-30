@@ -4,7 +4,7 @@
 
 ### Summary of metagenomics workflow
 
-![mindmap_workflow](D:\ubuntu\github\bioinformatics_pipeline\metagenomics\mindmap_workflow.jpg)
+![](mindmap_workflow.jpg)
 
 
 
