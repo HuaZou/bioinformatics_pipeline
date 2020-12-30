@@ -22,7 +22,26 @@ The workflow consists of two parts.
 
   
 
-### Structure
+### How  to run
+
+#### input file
+
+the fastqpath file
+
+| SampleID | LaneID | Path                                                         |
+| -------- | ------ | ------------------------------------------------------------ |
+| ND2      | ND2_R1 | /data/user/zouhua/project/diabetes_lx/Study/RawData/ND2_R1.fq.gz |
+| ND2      | ND2_R2 | /data/user/zouhua/project/diabetes_lx/Study/RawData/ND2_R2.fq.gz |
+
+#### command line 
+
+```bash
+perl main.pl -f test.tsv -a TruSeq2-PE.fa -o Run.all.sh
+```
+
+
+
+#### final directory structure
 
 ```bash
 # tree -L 3 /metagenomics/
@@ -55,4 +74,10 @@ The workflow consists of two parts.
 ├── mindmap_workflow.emmx
 └── mindmap_workflow.jpg
 ```
+
+
+
+### Contributors
+
+-   [Hua Zou](https://github.com/zouhua)
 
