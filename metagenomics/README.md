@@ -4,7 +4,7 @@
 
 ### Summary of metagenomics workflow
 
-![](mindmap_workflow.jpg)
+<img src="./mindmap_workflow.jpg" width="1000" height="600">
 
 
 
