@@ -1,6 +1,7 @@
 *.Rhistory
 *.RData
 *.html
+temp*
 
 .snakemake/
 dataset/

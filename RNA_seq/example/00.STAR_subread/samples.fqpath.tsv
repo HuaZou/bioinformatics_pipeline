@@ -1,0 +1,13 @@
+SampleID	LaneID	Path
+HBR_Rep1	HBR_Rep1.r1	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/HBR_Rep1.r1.fq.gz
+HBR_Rep1	HBR_Rep1.r2	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/HBR_Rep1.r2.fq.gz
+HBR_Rep2	HBR_Rep2.r1	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/HBR_Rep2.r1.fq.gz
+HBR_Rep2	HBR_Rep2.r2	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/HBR_Rep2.r2.fq.gz
+HBR_Rep3	HBR_Rep3.r1	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/HBR_Rep3.r1.fq.gz
+HBR_Rep3	HBR_Rep3.r2	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/HBR_Rep3.r2.fq.gz
+UHR_Rep1	UHR_Rep1.r1	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/UHR_Rep1.r1.fq.gz
+UHR_Rep1	UHR_Rep1.r2	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/UHR_Rep1.r2.fq.gz
+UHR_Rep2	UHR_Rep2.r1	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/UHR_Rep2.r1.fq.gz
+UHR_Rep2	UHR_Rep2.r2	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/UHR_Rep2.r2.fq.gz
+UHR_Rep3	UHR_Rep3.r1	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/UHR_Rep3.r1.fq.gz
+UHR_Rep3	UHR_Rep3.r2	/disk/user/zouhua/pipeline/dataset/00.RNA_seq/RawData/UHR_Rep3.r2.fq.gz
