@@ -31,15 +31,22 @@ my $kneaddata = join("", $dir, "Run.s2.kneaddata.sh");
 my $merge     = join("", $dir, "Run.s3.merge.sh");
 my $humann    = join("", $dir, "Run.s4.humann.sh");
 my $metaphlan = join("", $dir, "Run.s5.metaphlan.sh");
-
+my $profile   = join("", $dir, "Run.s6.profile.sh");
 
 # scripts in bin
 my $bin         = "$Bin/bin";
+my $util        = "$Bin/util";
 my $s_qc        = "$bin/qc.pl";
 my $s_kneaddata = "$bin/kneaddata.pl";
 my $s_merge     = "$bin/merge.pl";
 my $s_humann    = "$bin/humann.pl";
 my $s_metaphlan = "$bin/metaphlan.pl";
+my $s_profile   = "$bin/convert2matrix.pl";
+my $s_unifrac   = "$util/calculate_unifrac.R";
+
+# mpa_v30_CHOCOPhlAn_201901_species_tree.nwk
+my $species_tree = "$util/mpa_v30_CHOCOPhlAn_201901_species_tree.nwk";
+
 
 ########## Steps in metagenomics pipeline #################
 ##################################################
@@ -63,9 +70,21 @@ system("perl $s_humann -f $file -d $cwd -o $humann");
 #  step5 get taxonomy profile
 system("perl $s_metaphlan -f $file -d $cwd -o $metaphlan");
 
+##################################################
+#  step5 get taxonomy profile
+system("perl $s_metaphlan -f $file -d $cwd -o $metaphlan");
+
+##################################################
+#  step6 get profile matrix
+system("perl $s_profile -s $s_unifrac -t $species_tree -d $cwd -o $profile");
 
 open(OT, "> $out") or die "can't open $out\n";
-print OT "sh $qc\nsh $kneaddata\nsh $merge\nsh $humann\nsh $metaphlan\n";
+print OT "sh $qc\n";
+print OT "sh $kneaddata\n";
+print OT "sh $merge\n";
+print OT "sh $humann\n";
+print OT "sh $metaphlan\n";
+print OT "sh $profile\n";
 close(OT);
 
 

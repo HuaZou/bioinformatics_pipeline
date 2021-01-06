@@ -45,9 +45,6 @@ foreach my $key (keys %file_name){
         print OT "sh $bash\n";         
     #}
 }
-
-print OT "merge_metaphlan_tables.py $dir/*metagenome.tsv > $dir/merge_metaphlan.tsv\n";
-print OT "Rscript /data/share/database/metaphlan_databases/calculate_unifrac.R $dir/merge_metaphlan.tsv /data/share/database/metaphlan_databases/mpa_v30_CHOCOPhlAn_201901_species_tree.nwk $dir/unifrac_merged_mpa3_profiles.tsv";
 close(OT);
 
 sub usage{
