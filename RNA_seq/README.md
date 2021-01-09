@@ -73,7 +73,6 @@ perl main.pl -f samples.fqpath.tsv -c configure.cfg -p Run.all.sh -t kallisto -o
 # tree -L 3 RNA_seq
 ./RNA_seq
 ├── README.md
-├── Run.all.sh
 ├── bin
 │   ├── align_hisat2.pl
 │   ├── align_kallisto.pl
@@ -84,7 +83,6 @@ perl main.pl -f samples.fqpath.tsv -c configure.cfg -p Run.all.sh -t kallisto -o
 │   ├── qc.pl
 │   ├── stringtie.pl
 │   └── trim_galore.pl
-├── configure.cfg
 ├── example
 │   ├── 00.STAR_subread
 │   │   ├── Run.all.sh
@@ -112,26 +110,8 @@ perl main.pl -f samples.fqpath.tsv -c configure.cfg -p Run.all.sh -t kallisto -o
 │       ├── samples.fqpath.tsv
 │       └── work.sh
 ├── main.pl
-├── metadata.tsv
 ├── mindmap_workflow.emmx
 ├── mindmap_workflow.jpg
-├── result
-│   ├── Run.align_star.sh
-│   ├── Run.featureCounts.sh
-│   ├── Run.qc.sh
-│   ├── Run.trim_galore.sh
-│   ├── align_star
-│   ├── featureCounts
-│   ├── quality
-│   │   ├── fastqc
-│   │   └── multiqc
-│   ├── script
-│   │   ├── align_star
-│   │   ├── featureCounts
-│   │   ├── quality
-│   │   └── trim_galore
-│   └── trim_galore
-├── samples.fqpath.tsv
 ├── util
 │   ├── combineTable.pl
 │   ├── get_kallisto_profile.R

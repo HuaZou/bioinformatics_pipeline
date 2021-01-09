@@ -1,0 +1,89 @@
+import pandas as pd
+import numpy as np
+from qiime2 import Artifact
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tabulate import tabulate
+
+
+# GLOBALS ----------------------------------------------------------------------
+configfile: "config.yaml"
+
+
+# RULEORDER DIRECTIVES ---------------------------------------------------------
+ruleorder: feature_classifier > import_taxonomy_to_qza
+#ruleorder: denoise_dada2_pe > filter_sequences_by_id
+#ruleorder: remove_chimera > filter_sequences_by_taxonomy
+#ruleorder: filter_taxonomy > unzip_taxonomy_to_tsv
+
+# RESULT -----------------------------------------------------------------------
+rule all:
+    input:
+        os.path.join(config["result"]["import"], "paired-end-demux.qza"),
+
+        os.path.join(config["result"]["remove"], "paired-end-demux-trim.qza"),
+
+        os.path.join(config["result"]["import"], "paired-end-demux-fastq_counts_describe.md"),
+        os.path.join(config["result"]["remove"], "paired-end-demux-trim-fastq_counts_describe.md"),
+
+        os.path.join(config["result"]["denoise"], "table_final.qza"),
+        os.path.join(config["result"]["taxonomy"], "taxonomy_final.qza"),
+        os.path.join(config["result"]["taxonomy"], "taxonomy_final.tsv"),
+        os.path.join(config["result"]["denoise"], "repseqs_lengths_describe.md"),
+        """
+        os.path.join(config["result"]["tree"], "rooted_tree.qzv"),
+        os.path.join(config["result"]["tree"], "aligned_repseqs_gaps_describe.md"),
+        os.path.join(config["result"]["tree"], "repseqs_properties.pdf"),
+        os.path.join(config["result"]["tree"], "repseqs_to_filter_outliers.tsv"),
+        os.path.join(config["result"]["tree"], "repseqs_to_filter_unassigned.tsv"),
+
+        os.path.join(config["result"]["alpha"], "alpha_rarefaction.qzv"),
+        os.path.join(config["result"]["alpha"], "faith_pd_group_significance.qzv"),
+        os.path.join(config["result"]["alpha"], "observed_features_group_significance.qzv"),
+        os.path.join(config["result"]["alpha"], "shannon_group_significance.qzv"),
+        os.path.join(config["result"]["alpha"], "evenness_group_significance.qzv"),
+
+        os.path.join(config["result"]["beta"], "bray_curtis_emperor.qzv"),
+        os.path.join(config["result"]["beta"], "bray_curtis_group_significance.qzv"),
+        os.path.join(config["result"]["beta"], "jaccard_emperor.qzv"),
+        os.path.join(config["result"]["beta"], "jaccard_group_significance.qzv"),
+        os.path.join(config["result"]["beta"], "unweighted_unifrac_emperor.qzv"),
+        os.path.join(config["result"]["beta"], "unweighted_unifrac_group_significance.qzv"),
+        os.path.join(config["result"]["beta"], "weighted_unifrac_emperor.qzv"),
+        os.path.join(config["result"]["beta"], "weighted_unifrac_group_significance.qzv"),
+
+        os.path.join(config["result"]["report"], "report.html")
+         """
+
+# RULES -----------------------------------------------------------------------
+# IMPORT ----------------------------------------------------------------
+include: "rules/import.smk"
+
+# REMOVE PRIMER SEQUENCE ------------------------------------------------
+include: "rules/remove_primer.smk"
+
+# SUMMARIZE FASTQ SEQUENCES ---------------------------------------------
+include: "rules/summarize_fastq.smk"
+
+# DENOISE ---------------------------------------------------------------
+include: "rules/denoise.smk"
+
+# TAXONOMY --------------------------------------------------------------
+include: "rules/taxonomy.smk"
+
+# FILTER CHIMERA AND CONTAMINATION --------------------------------------
+include: "rules/remove_chimera_contamination.smk"
+
+'''
+# SUMMARIZE FEATURE TABLE -----------------------------------------------
+include: "rules/summarize_table.smk"
+
+# ALIGNMENT & TREE ------------------------------------------------------
+include: "rules/tree.smk"
+
+# DIVERSITY -------------------------------------------------------------
+include: "rules/diversity.smk"
+
+# REPORT ----------------------------------------------------------------
+include: "rules/report.smk"
+'''
