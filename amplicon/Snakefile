@@ -30,7 +30,7 @@ rule all:
         os.path.join(config["result"]["taxonomy"], "taxonomy_final.qza"),
         os.path.join(config["result"]["taxonomy"], "taxonomy_final.tsv"),
         os.path.join(config["result"]["denoise"], "repseqs_lengths_describe.md"),
-        """
+  
         os.path.join(config["result"]["tree"], "rooted_tree.qzv"),
         os.path.join(config["result"]["tree"], "aligned_repseqs_gaps_describe.md"),
         os.path.join(config["result"]["tree"], "repseqs_properties.pdf"),
@@ -53,7 +53,7 @@ rule all:
         os.path.join(config["result"]["beta"], "weighted_unifrac_group_significance.qzv"),
 
         os.path.join(config["result"]["report"], "report.html")
-         """
+        
 
 # RULES -----------------------------------------------------------------------
 # IMPORT ----------------------------------------------------------------
@@ -74,7 +74,6 @@ include: "rules/taxonomy.smk"
 # FILTER CHIMERA AND CONTAMINATION --------------------------------------
 include: "rules/remove_chimera_contamination.smk"
 
-'''
 # SUMMARIZE FEATURE TABLE -----------------------------------------------
 include: "rules/summarize_table.smk"
 
@@ -86,4 +85,3 @@ include: "rules/diversity.smk"
 
 # REPORT ----------------------------------------------------------------
 include: "rules/report.smk"
-'''
