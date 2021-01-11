@@ -34,7 +34,7 @@ my $metaphlan_file = "$dir/all_merge_metaphlan.tsv";
 my $humann_pathabundance_file = "$dir/all_merge_pathabundance.tsv";
 my $humann_pathcoverage_file  = "$dir/all_merge_pathcoverage.tsv";
 my $humann_genefamilies_file  = "$dir/all_merge_genefamilies.tsv";
-print OT2 "merge_metaphlan_tables.py $metaphlan_dir/*metagenome.tsv | sed \'s/_metagenome//g\' > $metaphlan_file\n";
+print OT2 "merge_metaphlan_tables.py $metaphlan_dir/*metagenome.tsv | sed \'s/_metagenome//g\' > $metaphlan_file\n"; 
 print OT2 "humann_join_tables --input $humann_pathabundance_dir --output $humann_pathabundance_file && sed -i \'s/_merge_Abundance//g\'  $humann_pathabundance_file\n";
 print OT2 "humann_join_tables --input $humann_pathcoverage_dir --output $humann_pathcoverage_file && sed -i \'s/_merge_Coverage//g\'  $humann_pathcoverage_file\n";
 print OT2 "humann_join_tables --input $humann_genefamilies_dir --output $humann_genefamilies_file && sed -i \'s/_merge_Abundance\-RPKs//g\'  $humann_genefamilies_file\n";
@@ -53,11 +53,10 @@ sub usage{
 usage:
 	perl $0 -s <script> -t <tree> -d <real_dir> -o <out> 
 options:
-    -s|script   :[essential]. 
-    -t|tree     :[essential]. 
-    -d|real_dir :[essential].    
-	-o|out      :[essential].
-
+        -s|script   :[essential]. 
+        -t|tree     :[essential]. 
+        -d|real_dir :[essential].    
+        -o|out      :[essential].
 USAGE
     exit;
 };

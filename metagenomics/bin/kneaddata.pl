@@ -66,10 +66,10 @@ sub usage{
 usage:
 	perl $0 -f <file> -d <real_dir> -o <out> -a <adapter>
 options:
-	-f|file		:[essential].
-    -d|real_dir :[essential].  
-	-o|out      :[essential].
-    -a|adapt    :[essential].
+        -f|file	    :[essential].
+        -d|real_dir :[essential].  
+        -o|out      :[essential].
+        -a|adapt    :[essential].
 USAGE
     exit;
 };

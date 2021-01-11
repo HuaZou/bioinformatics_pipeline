@@ -43,6 +43,24 @@ ln -s silva-138-99-tax-515-806.qza reftax.qza
 ```
 
 
+
+
+### How to run 
+
+```bash
+conda activate qiime2-2020.8
+# debug
+snakemake -np -r --debug-dag result/03-denoise/table_final.qza --configfile config.yaml --snakefile Snakefile
+
+# wrokflow figure
+snakemake --dag --debug-dag result/03-denoise/table_final.qza | dot -Tsvg > workflow.svg
+
+# run
+snakemake result/03-denoise/table_final.qza --configfile config.yaml --snakefile Snakefile --cores 2
+```
+
+
+
 ###  pipeline directory 
 
 the pipeline comprised of three main parts: **Snakemake file, Rules and Scripts**. the following directory structure shows the final results of this pipeline.
@@ -180,21 +198,6 @@ amplicon/
 └── work.sh
 
 20 directories, 109 files
-```
-
-
-### How to run 
-
-```bash
-conda activate qiime2-2020.8
-# debug
-snakemake -np -r --debug-dag result/03-denoise/table_final.qza --configfile config.yaml --snakefile Snakefile
-
-# wrokflow figure
-snakemake --dag --debug-dag result/03-denoise/table_final.qza | dot -Tsvg > workflow.svg
-
-# run
-snakemake result/03-denoise/table_final.qza --configfile config.yaml --snakefile Snakefile --cores 2
 ```
 
 

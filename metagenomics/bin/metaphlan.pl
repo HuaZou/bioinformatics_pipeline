@@ -52,9 +52,9 @@ sub usage{
 usage:
 	perl $0 -f <file> -d <real_dir> -o <out> 
 options:
-	-f|file		:[essential].
-    -d|real_dir :[essential].    
-	-o|out      :[essential].
+        -f|file	    :[essential].
+        -d|real_dir :[essential].    
+        -o|out      :[essential].
 USAGE
     exit;
 };

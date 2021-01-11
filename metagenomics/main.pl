@@ -32,6 +32,7 @@ my $merge     = join("", $dir, "Run.s3.merge.sh");
 my $humann    = join("", $dir, "Run.s4.humann.sh");
 my $metaphlan = join("", $dir, "Run.s5.metaphlan.sh");
 my $profile   = join("", $dir, "Run.s6.profile.sh");
+my $metabolic = join("", $dir, "Run.s7.metabolic.sh");
 
 # scripts in bin
 my $bin         = "$Bin/bin";
@@ -43,9 +44,11 @@ my $s_humann    = "$bin/humann.pl";
 my $s_metaphlan = "$bin/metaphlan.pl";
 my $s_profile   = "$bin/convert2matrix.pl";
 my $s_unifrac   = "$util/calculate_unifrac.R";
+my $s_metabolic = "$bin/metabolic_pathway.pl";
 
-# mpa_v30_CHOCOPhlAn_201901_species_tree.nwk
+# database file & reference
 my $species_tree = "$util/mpa_v30_CHOCOPhlAn_201901_species_tree.nwk";
+my $metabolic_db = "/data/share/database/humann_databases/mapping_v201901";
 
 
 ########## Steps in metagenomics pipeline #################
@@ -78,6 +81,10 @@ system("perl $s_metaphlan -f $file -d $cwd -o $metaphlan");
 #  step6 get profile matrix
 system("perl $s_profile -s $s_unifrac -t $species_tree -d $cwd -o $profile");
 
+##################################################
+#  step7 get metablic pathway matrix
+system("perl $s_metabolic -f $file -db $metabolic_db -d $cwd -o $metabolic");
+
 open(OT, "> $out") or die "can't open $out\n";
 print OT "sh $qc\n";
 print OT "sh $kneaddata\n";
@@ -85,6 +92,7 @@ print OT "sh $merge\n";
 print OT "sh $humann\n";
 print OT "sh $metaphlan\n";
 print OT "sh $profile\n";
+print OT "sh $metabolic\n";
 close(OT);
 
 
@@ -102,8 +110,8 @@ USAGE
 
 sub version {
     print <<VERSION;
-    version:    v1.1
-    update:     20201224 - 20201225
+    version:    v1.2
+    update:     20201224 - 20210111
     author:     zouhua1\@outlook.com
 VERSION
 };

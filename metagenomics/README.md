@@ -2,25 +2,35 @@
 
 
 
-### Summary of metagenomics workflow
+To obtain the metagenome composition and function annotation profile via the popular software such as metaphlan and humman version 3 is very helpful when we do some research focusing on the known microorganisms in the environment like the gut. 
 
 <img src="./mindmap_workflow.jpg" width="1000" height="600">
 
 
 
+### Installation
+
+This pipeline is based on the metaphlan and humann version 3, so please install the two software before running it. In addition, removing the host DNA sequences is used the kneaddata and the user should download the dependent files. All the softwares could be installed by conda
+
+```bash   
+# install software 
+conda create --name metagenome metaphlan humann kneaddata fastqc multiqc fastp -y
+```
 
 
-The workflow consists of two parts. 
 
-* the software involved in Part1:
+### Download Referecne database 
 
-  * fastqc/multiqc
-  * kneaddata
-  * fastp 
-  * MetaPhlAn version 3
-  * HumaAn version 3
+After installing the software, we should configure all the reference
 
-  
+```bash
+# configure the database
+# metaphlan 
+# humann 
+# kneaddata
+```
+
+
 
 ### How  to run
 
@@ -47,46 +57,64 @@ perl main.pl -f test.tsv -a TruSeq2-PE.fa -o Run.all.sh
 
 
 
-#### final directory structure
+### Final directory structure
 
 ```bash
-# tree -L 3 metagenomics
-metagenomics
-├── README.md
+./MetaGenomics/
 ├── bin
 │   ├── convert2matrix.pl
 │   ├── humann.pl
 │   ├── kneaddata.pl
 │   ├── merge.pl
+│   ├── metabolic_pathway.pl
 │   ├── metaphlan.pl
 │   └── qc.pl
-├── example
-│   ├── Run.all.sh
-│   ├── TruSeq2-PE.fa
-│   ├── result
-│   │   ├── 00.quality
-│   │   ├── 01.kneaddata
-│   │   ├── 02.merge
-│   │   ├── 03.humann
-│   │   ├── 04.metaphlan
-│   │   ├── 05.profile
-│   │   ├── Run.s1.qc.sh
-│   │   ├── Run.s2.kneaddata.sh
-│   │   ├── Run.s3.merge.sh
-│   │   ├── Run.s4.humann.sh
-│   │   ├── Run.s5.metaphlan.sh
-│   │   ├── Run.s6.profile.sh
-│   │   └── script
-│   ├── test.tsv
-│   └── work.sh
 ├── main.pl
-├── mindmap_workflow.emmx
-├── mindmap_workflow.jpg
-└── util
-    ├── calculate_unifrac.R
-    └── mpa_v30_CHOCOPhlAn_201901_species_tree.nwk
+├── result
+│   ├── 00.quality
+│   │   ├── fastqc
+│   │   └── multiqc
+│   ├── 01.kneaddata
+│   ├── 02.merge
+│   ├── 03.humann
+│   │   ├── genefamilies
+│   │   ├── log
+│   │   ├── metaphlan
+│   │   ├── pathabundance
+│   │   └── pathcoverage
+│   ├── 04.metaphlan
+│   ├── 05.profile
+│   ├── 06.metabolic_pathway
+│   │   ├── EggNOG_COGs
+│   │   ├── genefamilies
+│   │   ├── Gene_Ontology
+│   │   ├── KEGG_Orthogroups
+│   │   ├── Level4_enzyme
+│   │   └── MetaCyc_Reactions
+│   ├── Run.s1.qc.sh
+│   ├── Run.s2.kneaddata.sh
+│   ├── Run.s3.merge.sh
+│   ├── Run.s4.humann.sh
+│   ├── Run.s5.metaphlan.sh
+│   ├── Run.s6.profile.sh
+│   ├── Run.s7.metabolic.sh
+│   └── script
+│       ├── 00.quality
+│       ├── 01.kneaddata
+│       ├── 02.merge
+│       ├── 03.humann
+│       ├── 04.metaphlan
+│       ├── 05.profile
+│       └── 06.metabolic_pathway
+├── Run.all.sh
+├── test.tsv
+├── TruSeq2-PE.fa 
+├── util
+│   ├── calculate_unifrac.R
+│   └── mpa_v30_CHOCOPhlAn_201901_species_tree.nwk
+└── work.sh
 
-11 directories, 22 files
+31 directories, 21 files
 ```
 
 
