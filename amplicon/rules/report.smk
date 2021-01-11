@@ -30,7 +30,7 @@ rule generate_report_md:
     input:
         configfile   = "config.yaml",
         mdsummary    = os.path.join(config["result"]["report"], "metadata_summary.md"),
-        fastq        = os.path.join(config["result"]["import"], "paired-end-demux-trim-fastq_counts_describe.md"), 
+        fastq        = os.path.join(config["result"]["remove"], "paired-end-demux-trim-fastq_counts_describe.md"), 
         amplicontype = os.path.join(config["result"]["denoise"], "repseqs_amplicon_type.txt"),
         repseqstsv   = os.path.join(config["result"]["tree"], "repseqs_properties.tsv"),
         repseqspdf   = os.path.join(config["result"]["tree"], "repseqs_properties.pdf"),
@@ -40,11 +40,11 @@ rule generate_report_md:
         samples      = os.path.join(config["result"]["denoise"], "table_summary_samples.txt"),
         features     = os.path.join(config["result"]["denoise"], "table_summary_features.txt"),
         visfastq     = os.path.join(config["result"]["remove"], "paired-end-demux-trim-fastq_summary.qzv"),
-        visrepseqs   = os.path.join(config["result"]["denoise"], "repseqs.qzv"),
+        visrepseqs   = os.path.join(config["result"]["denoise"], "repseqs_final.qzv"),
         tsvtaxonomy  = os.path.join(config["result"]["taxonomy"], "taxonomy.tsv"), 
         vistaxonomy  = os.path.join(config["result"]["taxonomy"], "taxonomy.qzv"),
-        vistable     = os.path.join(config["result"]["denoise"], "table.qzv"),
-        vistaxbar    = os.path.join(config["result"]["taxonomy"], "taxa_barplot.qzv")
+        vistable     = os.path.join(config["result"]["denoise"], "table_final.qzv"),
+        vistaxbar    = os.path.join(config["result"]["taxonomy"], "taxa_barplot.qzv"),
         visalpharare = os.path.join(config["result"]["alpha"], "alpha_rarefaction.qzv"),
         visevengs    = os.path.join(config["result"]["alpha"], "evenness_group_significance.qzv"),
         visfaithgs   = os.path.join(config["result"]["alpha"], "faith_pd_group_significance.qzv"),

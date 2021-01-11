@@ -30,13 +30,13 @@ rule all:
         os.path.join(config["result"]["taxonomy"], "taxonomy_final.qza"),
         os.path.join(config["result"]["taxonomy"], "taxonomy_final.tsv"),
         os.path.join(config["result"]["denoise"], "repseqs_lengths_describe.md"),
-  
+        
         os.path.join(config["result"]["tree"], "rooted_tree.qzv"),
         os.path.join(config["result"]["tree"], "aligned_repseqs_gaps_describe.md"),
         os.path.join(config["result"]["tree"], "repseqs_properties.pdf"),
         os.path.join(config["result"]["tree"], "repseqs_to_filter_outliers.tsv"),
         os.path.join(config["result"]["tree"], "repseqs_to_filter_unassigned.tsv"),
-
+        
         os.path.join(config["result"]["alpha"], "alpha_rarefaction.qzv"),
         os.path.join(config["result"]["alpha"], "faith_pd_group_significance.qzv"),
         os.path.join(config["result"]["alpha"], "observed_features_group_significance.qzv"),
@@ -53,7 +53,7 @@ rule all:
         os.path.join(config["result"]["beta"], "weighted_unifrac_group_significance.qzv"),
 
         os.path.join(config["result"]["report"], "report.html")
-        
+
 
 # RULES -----------------------------------------------------------------------
 # IMPORT ----------------------------------------------------------------

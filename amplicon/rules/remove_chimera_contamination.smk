@@ -65,7 +65,7 @@ rule filter_table_req_by_contamination:
         table   = os.path.join(config["result"]["denoise"], "table_nonchimera.qza"),
         noncontam_seq = os.path.join(config["result"]["denoise"], "repseqs_nonchimera_contam.qza")
     output:
-        filteredseqs = os.path.join(config["result"]["denoise"], "repseq_final.qza"),
+        filteredseqs = os.path.join(config["result"]["denoise"], "repseqs_final.qza"),
         filteredtable  = os.path.join(config["result"]["denoise"], "table_final.qza")
     shell:
         '''
@@ -85,7 +85,7 @@ rule filter_sequences_by_id:
         repseqs         = os.path.join(config["result"]["denoise"], "repseqs_nonchimera_contam.qza"),
         repseqstofilter = config["params"]["filter_repseq"]["repseqs_to_filter"]
     output:
-        os.path.join(config["result"]["denoise"], "repseq_final.qza")
+        os.path.join(config["result"]["denoise"], "repseqs_final.qza")
     shell:
         '''
         qiime feature-table filter-seqs \
@@ -98,7 +98,7 @@ rule filter_sequences_by_id:
 rule filter_table_by_contam:
     input:
         table        = os.path.join(config["result"]["denoise"], "table_nonchimera.qza"),
-        filteredseqs = os.path.join(config["result"]["denoise"], "repseq_final.qza")
+        filteredseqs = os.path.join(config["result"]["denoise"], "repseqs_final.qza")
     output:
         os.path.join(config["result"]["denoise"], "table_final.qza")
     shell:

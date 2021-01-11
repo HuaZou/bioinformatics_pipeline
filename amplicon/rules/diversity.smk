@@ -100,7 +100,7 @@ rule diversity_beta_group_significance:
     params:
         column = config["params"]["diversity"]["beta_group_column"]
     log:
-        os.path.join(config["logs"]["beta"], "diversity_beta_group_significance.log") 
+        os.path.join(config["logs"]["beta"], "{metric}_group_significance.log") 
     output:
         os.path.join(config["result"]["beta"], "{metric}_group_significance.qzv")
     shell:
