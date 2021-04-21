@@ -1,0 +1,17 @@
+Sample_Name,Sample_Well,Sample_Source,Sample_Group,Sample_Label,Pool_ID,Array,Slide,Basename
+P032_PrimaryCancerTissue,A01,PrimaryCancerTissue,Pancreatic tumor,P032,,R01C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800017/202250800017_R01C01
+P032_LiverMetastasis,B01,LiverMetastasis,Pancreatic tumor,P032,,R02C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800017/202250800017_R02C01
+P007_PrimaryCancerTissue,C01,PrimaryCancerTissue,Pancreatic tumor,P007,,R03C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800017/202250800017_R03C01
+P007_ParacancerousTissue,D01,ParacancerousTissue,Pancreatic tumor,P007,,R04C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800017/202250800017_R04C01
+P025_LiverMetastasis,E01,LiverMetastasis,Pancreatic tumor,P025,,R05C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800017/202250800017_R05C01
+P025_PrimaryCancerTissue,F01,PrimaryCancerTissue,Pancreatic tumor,P025,,R06C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800017/202250800017_R06C01
+P015_PrimaryCancerTissue,G01,PrimaryCancerTissue,Pancreatic tumor,P015,,R07C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800017/202250800017_R07C01
+P015_ParacancerousTissue,H01,ParacancerousTissue,Pancreatic tumor,P015,,R08C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800017/202250800017_R08C01
+P019_PrimaryCancerTissue,A02,PrimaryCancerTissue,Control,P019,,R01C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800184/202250800184_R01C01
+P019_ParacancerousTissue,B02,ParacancerousTissue,Control,P019,,R02C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800184/202250800184_R02C01
+P014_PrimaryCancerTissue,C02,PrimaryCancerTissue,Control,P014,,R03C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800184/202250800184_R03C01
+P014_ParacancerousTissue,D02,ParacancerousTissue,Control,P014,,R04C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800184/202250800184_R04C01
+P003_PrimaryCancerTissue,E02,PrimaryCancerTissue,Control,P003,,R05C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800184/202250800184_R05C01
+P003_ParacancerousTissue,F02,ParacancerousTissue,Control,P003,,R06C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800184/202250800184_R06C01
+P024_LiverMetastasis,G02,LiverMetastasis,Control,P024,,R07C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800184/202250800184_R07C01
+P024_PrimaryCancerTissue,H02,PrimaryCancerTissue,Control,P024,,R08C01,2.02251E+11,/disk/user/zouhua/pipeline/dataset/04.methylation/IDAT/202250800184/202250800184_R08C01
