@@ -1,0 +1,135 @@
+---
+title: "PCoA"
+date: "Created: 2021-01-11 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(vegan)
+library(ape)
+library(ggplot2)
+
+grp <- c("lupus", "Control")
+grp.col <- c("#283891", "#C1272D")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+sp.prof <- fread("../../Result/profile/final_species_trim.tsv")
+
+unweight_unifrac <- read.table("../../Result/distance/unweighted_unifrac.tsv")
+weight_unifrac <- read.table("../../Result/distance/weighted_unifrac.tsv")
+```
+
+### PCoA
+
+```{r}
+get_PCoA <- function(profile  = unweight_unifrac,
+                     metadata = phen,
+                     kind = "distance"){
+  
+  # profile  = unweight_unifrac
+  # metadata = phen
+  # kind = "distance"
+  
+  if(kind == "distance"){
+    pid <- intersect(colnames(profile), phen$SampleID)
+    distance <- profile[pid, pid]
+    datphen <- phen %>% filter(SampleID%in%pid) %>%
+      dplyr::select(SampleID, Group) %>%
+      mutate(Group=factor(Group, levels = grp))
+    dis <- as.dist(distance)
+  }else{
+    dat <- profile %>% column_to_rownames("V1") 
+    
+    sid <- intersect(colnames(dat), phen$SampleID)
+    dat.cln <- dat[, colnames(dat)%in%sid]
+    datphen <- phen %>% filter(SampleID%in%sid) %>%
+      dplyr::select(SampleID, Group) %>%
+      mutate(Group=factor(Group, levels = grp))
+    dis <- vegdist(t(dat.cln), method = "bray")
+  }
+  
+  pcoa <- pcoa(dis)
+  eig <- pcoa$values[, "Eigenvalues"]
+  eig_var <- eig[1:2]
+  eig_var_explain <- round(eig_var/sum(eig), 4) * 100 
+  explains <- paste0(paste0("PCoA", seq(2)), " (", paste0(eig_var_explain, "%"), ")")
+  score <- data.frame(pcoa$vectors[, c(1:2)]) %>% 
+    setNames(c("PCoA1", "PCoA2")) %>%
+    rownames_to_column("SampleID") %>%
+    inner_join(datphen, by="SampleID")
+	
+  # test
+  set.seed(123)
+  res_adonis <- adonis(dis ~ datphen$Group, permutations = 999)
+  adn_pvalue <- res_adonis[[1]][["Pr(>F)"]][1]
+  adn_rsquared <- round(res_adonis[[1]][["R2"]][1],3)
+  #use the bquote function to format adonis results to be annotated on the ordination plot.
+  signi_label <- paste(cut(adn_pvalue,breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ".")))
+    adn_res_format <- bquote(atop(atop("PERMANOVA",R^2==~.(adn_rsquared)),atop("p-value="~.(adn_pvalue)~.(signi_label), phantom())))  
+  
+  pl <- ggplot(score, aes(x=PCoA1, y=PCoA2, color=Group))+
+        geom_point(size=4)+
+        labs(x=explains[1], y=explains[2])+
+        scale_color_manual(values=grp.col,
+                          labels=grp)+
+        annotate("text", x = max(score$PCoA1)-0.05,
+                       y = min(score$PCoA2),
+                       label = adn_res_format)+
+        geom_hline(yintercept = 0, linetype = "dashed")+
+        geom_vline(xintercept = 0, linetype = "dashed")+
+        theme_bw()+
+        theme(axis.title = element_text(size=10, color="black", face="bold"),
+              axis.text = element_text(size=9, color="black"),
+              text = element_text(size=8, color="black", family="serif"),
+              strip.text = element_text(size=9, color="black", face="bold"), 
+              panel.grid = element_blank(),
+              legend.text=element_text(size=10, color = "black"),
+              legend.background = element_rect(color = "black", fill="white"))
+  return(pl)
+}
+```
+
+
+### unweight unifrac
+```{r, fig.width=8, fig.height=6}
+unwei_pl <- get_PCoA(profile = unweight_unifrac)
+unwei_pl
+if(!dir.exists("../../Result/PCoA")){
+  dir.create("../../Result/PCoA")
+}
+ggsave(filename = "../../Result/PCoA/unweight_unifrac_PCoA.pdf", 
+       plot = unwei_pl, width = 7, height = 5, dpi = 600)
+```
+
+### weight unifrac
+```{r, fig.width=8, fig.height=6}
+wei_pl <- get_PCoA(profile = weight_unifrac)
+wei_pl
+ggsave(filename = "../../Result/PCoA/weight_unifrac_PCoA.pdf", 
+       plot = wei_pl, width = 7, height = 5, dpi = 600)
+```
+
+
+### common species profile
+```{r, fig.width=8, fig.height=6}
+sp_pl <- get_PCoA(profile = sp.prof, kind = "relative")
+sp_pl
+ggsave(filename = "../../Result/PCoA/common_species_PCoA.pdf", 
+       plot = sp_pl, width = 7, height = 5, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

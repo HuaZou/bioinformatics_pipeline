@@ -1,0 +1,183 @@
+---
+title: "LDA Effect Size (LEfSe)"
+date: "Created: 2021-01-12 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(SummarizedExperiment)
+library(lefser)
+library(ggplot2)
+
+
+grp <- c("lupus", "Control")
+grp.col <- c("#283891", "#C1272D")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+pm.prf <- fread("../../Result/profile/final_phylum_trim.tsv") 
+gs.prf <- fread("../../Result/profile/final_genus_trim.tsv")
+sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
+```
+
+
+### Function
+```{r}
+# building SummarizedExperiment data
+get_Experiment_Set <- function(profile  = pm.prf,
+                               metadata = phen){
+  
+  # profile  = pm.prf
+  # metadata = phen
+  
+  sid <- intersect(colnames(profile), metadata$SampleID)
+  meta <- metadata %>% filter(SampleID%in%sid) %>%
+            mutate(Group=factor(Group, levels = grp)) %>%
+            column_to_rownames("SampleID") 
+  prof <- profile %>% column_to_rownames("V1")%>% 
+    dplyr::select(all_of(rownames(meta)))
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prof)){ 
+    if (!(colnames(prof)[i] == rownames(meta)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  counts <- as.matrix(prof)
+  colData <- meta
+  
+  metaData <-  "Microbial Composition"
+  se <- SummarizedExperiment(assays=list(counts=counts),
+                             #rowRanges=rowRanges, 
+                             colData=colData,
+                             metadata=metaData)
+  
+  return(se)
+}
+
+# lefse
+get_lefse <- function(exprsdata = sp.se,
+                      kw.p = 0.05,
+                      wl.p = 0.05,
+                      lda.cutoff = 2){
+  
+  # exprsdata = sp.se
+  # kw.p = 0.1
+  # wl.p = 0.1
+  # lda.cutoff = 0
+  
+  res <- lefser(exprsdata,
+            kruskal.threshold = kw.p,
+            wilcox.threshold = wl.p,
+            lda.threshold = lda.cutoff,
+            groupCol = "Group",
+            blockCol = NULL,
+            assay = 1L,
+            trim.names = FALSE)
+  
+  return(res)
+}
+
+get_lefse_plot <- function(lefse = sp.se){
+  
+  # lefse = sp.lefse
+
+  
+  plotdata <- lefse %>% mutate(Group=ifelse(scores > 0, grp[2], grp[1])) %>%
+    mutate(Group=factor(Group, levels = grp))
+
+  pl <- ggplot(plotdata, aes(x=reorder(Names, scores), y=scores))+ 
+    ylab("LDA SCORE (log 10)")+
+    xlab("")+
+    geom_bar(stat = "identity", aes(fill = Group), color="black")+
+    scale_fill_manual(values = grp.col)+
+    coord_flip()+
+    theme_bw()+
+    theme(axis.ticks.length = unit(0.4,"lines"), 
+          axis.ticks = element_line(color='black'),
+          axis.line = element_line(colour = "black"),
+          axis.title.x = element_text(colour='black', size=12,face = "bold"),
+          axis.text.x = element_text(colour='black', size=10, face = "bold"),
+          axis.text.y = element_text(colour='black', size=10, face = "italic"),
+          text = element_text(size=8, color="black", family="serif"),
+          legend.title=element_blank(),
+          legend.text=element_text(size=12,face = "bold",colour = "black",
+                                     margin = margin(r = 20)),
+          #legend.position = c(-1,-0.1),
+          legend.position = c(.7, .05),
+          legend.direction = "horizontal",
+          legend.key.width = unit(0.8,"cm"),
+          legend.key.height = unit(0.5,"cm"))  
+    
+}
+```
+
+
+### species
+```{r}
+sp.se <- get_Experiment_Set(profile = sp.prf, metadata = phen)
+sp.lefse <- get_lefse(exprsdata = sp.se, kw.p = 0.1, wl.p = 0.1, lda.cutoff = 0)
+sp.pl <- get_lefse_plot(lefse = sp.lefse)
+sp.pl
+
+dir_lefse <- "../../Result/lefse"
+if(!dir.exists(dir_lefse)){
+  dir.create(dir_lefse)
+}
+species_LDAscores_path <- paste(dir_lefse, "species_LDAscores.csv", sep = "/")
+write.csv(sp.lefse, file = species_LDAscores_path, row.names = F)
+
+species_LEfseplot_path <- paste(dir_lefse, "species_LEfseplot.pdf", sep = "/")
+ggsave(filename = species_LEfseplot_path, plot = sp.pl, width = 8, height = 7, dpi = 600)
+```
+
+
+### genus
+```{r}
+gs.se <- get_Experiment_Set(profile = gs.prf, metadata = phen)
+gs.lefse <- get_lefse(exprsdata = gs.se, kw.p = 0.1, wl.p = 0.1, lda.cutoff = 0)
+gs.pl <- get_lefse_plot(lefse = gs.lefse)
+gs.pl
+
+dir_lefse <- "../../Result/lefse"
+if(!dir.exists(dir_lefse)){
+  dir.create(dir_lefse)
+}
+genus_LDAscores_path <- paste(dir_lefse, "genus_LDAscores.csv", sep = "/")
+write.csv(gs.lefse, file = genus_LDAscores_path, row.names = F)
+
+genus_LEfseplot_path <- paste(dir_lefse, "genus_LEfseplot.pdf", sep = "/")
+ggsave(filename = genus_LEfseplot_path, plot = gs.pl, width = 8, height = 5, dpi = 600)
+```
+
+
+### phylum
+```{r, fig.height=5, fig.width=12}
+pm.se <- get_Experiment_Set(profile = pm.prf, metadata = phen)
+pm.lefse <- get_lefse(exprsdata = pm.se, kw.p = 1, wl.p = 1, lda.cutoff = 0)
+pm.pl <- get_lefse_plot(lefse = pm.lefse)
+
+dir_lefse <- "../../Result/lefse"
+if(!dir.exists(dir_lefse)){
+  dir.create(dir_lefse)
+}
+phylum_LDAscores_path <- paste(dir_lefse, "phylum_LDAscores.csv", sep = "/")
+write.csv(pm.lefse, file = phylum_LDAscores_path, row.names = F)
+
+phylum_LEfseplot_path <- paste(dir_lefse, "phylum_LEfseplot.pdf", sep = "/")
+ggsave(filename = phylum_LEfseplot_path, plot = pm.pl, width = 10, height = 3, dpi = 600)
+```
+
+### version
+```{r}
+sessionInfo()
+```

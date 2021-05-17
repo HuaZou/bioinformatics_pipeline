@@ -1,0 +1,227 @@
+---
+title: "microbiota composition: sankey"
+date: "Created: 2021-01-14 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+library(ggalluvial)
+
+grp <- c("lupus", "Control")
+grp.col <- c("#283891", "#C1272D")
+
+tax_level <- c("Actinobacteria", "Bacteroidetes", "Firmicutes",
+               "Fusobacteria", "Proteobacteria", "Synergistetes",
+               "Tenericutes", "Verrucomicrobia", "Ascomycota", "Other")
+tax_color <- c("#8DD3C7", "#FFFFB3", "#BEBADA", "#FB8072", "#80B1D3", 
+               "#FDB462", "#B3DE69", "#FCCDE5", "#BC80BD", "#C0C0C0")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
+taxa <- fread("../../Result/profile/taxonomy_levels.tsv")
+```
+
+
+### function 
+```{r}
+sankey_plot <- function(profile = sp.prf,
+                        metadata = phen,
+                        top = 20){
+  
+  # profile = sp.prf
+  # metadata = phen
+  # top = 30
+  
+  mdat <- metadata %>% dplyr::select(c("SampleID", "Group")) %>%
+    inner_join(profile %>% column_to_rownames("V1") %>%
+                 t() %>% data.frame() %>%
+                 rownames_to_column("SampleID"),
+               by = "SampleID") 
+  
+  mdat_mean_top <- mdat %>%
+    select(-c("SampleID", "Group")) %>%
+    summarise(across(everything(), mean)) %>%
+    tidyr::gather(key="tax", value="value") %>%
+    arrange(desc(value)) %>%
+    slice(c(1:top)) %>%
+    mutate(tax=as.character(tax),
+           tax2=tax)
+  
+  mdat_mean_other <- mdat %>%
+    select(-c("SampleID", "Group")) %>%
+    summarise(across(everything(), mean)) %>%
+    tidyr::gather(key="tax", value="value") %>%
+    arrange(desc(value)) %>%
+    slice(-c(1:top)) %>%
+    mutate(tax=as.character(tax))
+
+  mdat_mean_other <- mdat %>% 
+      select(-SampleID) %>%
+      group_by(Group) %>%
+      summarise(across(everything(), mean)) %>%
+      ungroup() %>%
+      tidyr::gather(key="tax", value="value", -Group) %>%
+      filter(tax%in%mdat_mean_other$tax) %>%
+      select(-tax) %>%
+      group_by(Group) %>%
+      summarise(across(everything(), sum)) %>%
+      ungroup() %>%    
+      mutate(tax="Other")
+  
+  mdat_merge <- mdat %>%
+    select(-SampleID) %>%
+    group_by(Group) %>%
+    summarise(across(everything(), mean)) %>%
+    ungroup() %>%
+    tidyr::gather(key="tax", value="value", -Group) %>%
+    filter(tax%in%mdat_mean_top$tax) %>%
+    mutate(Group=factor(Group, levels = grp)) %>%
+    rbind(mdat_mean_other) %>%
+    tidyr::spread(key = "tax", value = "value") %>%
+    column_to_rownames("Group") %>%
+    t() %>% data.frame() %>%
+    rownames_to_column("Species")
+  
+  
+  taxa_new <- data.frame(rep("Other", 7), row.names = colnames(taxa)) %>%
+    t() %>% data.frame() %>%
+    rbind(taxa) 
+  rownames(taxa_new) <- NULL
+  
+  mdat_final <- mdat_merge %>%
+    inner_join(taxa_new %>% select(all_of(c("Phylum", "Genus", "Species"))),
+               by = "Species") %>%
+    group_by(Phylum, Genus, Species) %>%
+    summarise(across(everything(), sum)) %>%
+    ungroup() %>% 
+    tidyr::gather(key="Group", value = "Abundance", 
+                  -c("Phylum", "Genus", "Species"))
+      
+  # top_species <-  mdat %>% dplyr::select(-c("Phylum", "Genus")) %>%
+  #   group_by(Species) %>%
+  #   rowwise() %>%
+  #   mutate(SumAbundance=mean(c_across(everything()))) %>%
+  #   ungroup() %>%
+  #   dplyr::select(c("Species", "SumAbundance")) %>%
+  #   arrange(desc(SumAbundance)) %>%
+  #   slice(1:top)
+  # 
+  # mdat_sum_top_species <- mdat_sum_per_sample %>%
+  #   filter(Species %in% as.character(top_species$Species))
+  
+  # mdat_sum_top_species <- mdat_sum_per_sample %>%
+  #   group_by(Species) %>%
+  #   top_n(n = top, wt = Abundance) %>%
+  #   ungroup()
+  
+  # match color for tax
+  match_color <- function(tax_id){
+      tax_idx <- pmatch(tax_id, tax_level)
+      col <- tax_color[tax_idx]
+      tax_name <- tax_level[tax_idx]
+      res <- data.frame(tax=tax_name, color=col)
+      return(res)
+  } 
+  
+  ann_colors <- match_color(unique(as.character(mdat_final$Phylum))) 
+  mdat_new <- mdat_final %>% mutate(Phylum=factor(Phylum, levels = ann_colors$tax)) %>%
+    mutate(Genus=factor(as.character(Genus)))
+  
+  # genus color
+  tax_table_gs <- mdat_new %>% dplyr::select(c("Phylum", "Genus")) %>% unique()
+  pm_fr <- levels(mdat_new$Phylum)
+  tax_table_gs$color <- NA
+  for(i in 1:length(pm_fr)){
+    idx <- grep(pm_fr[i], as.character(tax_table_gs$Phylum))
+    idx_col <- with(ann_colors, ann_colors[tax%in%pm_fr[i], ])$color
+    tax_table_gs$color[idx] <- colorRampPalette(c(idx_col, "white"))(50)[seq(10, 40, 5)]
+  }
+  
+  tax_table_gs$color <- ifelse(tax_table_gs$Genus == "Other", tax_color[10], tax_table_gs$color)
+  genus_color <- tax_table_gs %>% dplyr::select(c("Genus", "color")) %>% unique() %>%
+    setNames(c("Kind", "color")) 
+  
+  # species color
+  tax_table_sp <- mdat_new %>% dplyr::select(c("Genus", "Species")) %>% unique()
+  gs_fr <- levels(tax_table_sp$Genus)
+  tax_table_sp$color <- NA
+  for(i in 1:length(gs_fr)){
+    idx2 <- grep(gs_fr[i], as.character(tax_table_sp$Genus))
+    idx_col2 <- with(genus_color, genus_color[Kind%in%gs_fr[i], ])$color
+    tax_table_sp$color[idx2] <- colorRampPalette(c(idx_col2, "white"))(50)[seq(10, 40, 5)]
+  }
+  
+  tax_table_sp$color <- ifelse(tax_table_sp$Species == "Other", tax_color[10], tax_table_sp$color)
+  species_color <- tax_table_sp %>% dplyr::select(c("Species", "color")) %>% unique() %>%
+    setNames(c("Kind", "color"))
+  
+  # group color
+  group_color <- mdat_new %>% dplyr::select(Group) %>% unique() %>%
+    mutate(color=grp.col[1:length(unique(mdat_new$Group))]) %>%
+    setNames(c("Kind", "color"))
+  
+  all_color <- rbind(ann_colors %>% setNames(c("Kind", "color")),
+                     genus_color, species_color, group_color) %>% unique() 
+  
+  #colorRampPalette(c(genus_color[1], "white"))(100)
+  
+  pldata <- mdat_new %>% tidyr::gather(key="Group", value = "Type", -Abundance) %>%
+    mutate(Group=factor(Group, levels = c("Phylum", "Genus", "Species", "Group"))) %>%
+    mutate(Type=factor(as.character(Type), levels = c(all_color$Kind)))
+  type <- summary(pldata$Group)
+  pldata$Flow <- rep(1:type[1], length(type))
+  
+  pl <- ggplot(pldata, aes(x = Group, y = Abundance,
+    stratum = Type, alluvium = Flow, fill = Type)) +
+    geom_stratum() +  
+    geom_text(stat = "stratum", infer.label = TRUE, size = 4, 
+              family = "serif", fontface = "italic") +  
+    geom_flow() +  
+    scale_fill_manual(values = c(all_color$color),
+                      label = c(all_color$Kind)) + 
+    scale_x_discrete(limits = c("Phylum", "Genus", "Species", "Group")) +  
+    scale_y_continuous(expand = c(0, 0)) +
+    guides(fill=F) +
+    labs(x = "", y = "Abundance") +  
+    theme(legend.position = "none", 
+        axis.line = element_line(),
+        panel.background = element_blank(),
+        axis.title.y = element_text(face = "bold",color = "black",size = 14),
+        axis.title.x = element_text(face = "bold",color = "black",size = 14),
+        axis.text.y = element_text(face = "bold",color = "black",size = 10),
+        axis.text.x = element_text(face = "bold",color = "black",size = 12),
+        text=element_text(family="serif"))
+  return(pl)
+}
+```
+
+
+### plot
+```{r, fig.height=5, fig.width=12}
+taxpl <- sankey_plot(profile = sp.prf, top = 20)
+taxpl
+
+dir <- "../../Result/composition"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+tax.path <- paste(dir, "sankey_taxonomy.pdf", sep = "/")
+ggsave(filename = tax.path, plot = taxpl, width = 10, height = 6, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,265 @@
+---
+title: "microbiota composition: circos"
+date: "Created: 2021-01-14 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(circlize)
+library(grid)
+library(data.table)
+library(ComplexHeatmap)
+
+grp <- c("lupus", "Control")
+grp.col <- c("#283891", "#C1272D")
+color_phylum <- c("#BEAED4", "#FDC086", "#FFFF99", "#386CB0", "#F0027F")
+color_otu <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A",
+               "#993116", "#6798CE", "#146666", "#CE9924", "#6D659D",
+               "#9F9B27", "#6D659D", "#9F9B27", "#C80b8A", "#2C3A89",
+               "#C8C5C5", "#90E2BF", "#FDAB4D", "#F4F4E8", "#B054BF",
+               "#FCE873", "#FFCCDB", "#AFD300", "#B089D8", "#F96E6F",
+               "#AAD3ED", "#639BCE")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+pm.prf <- fread("../../Result/profile/final_phylum_trim.tsv")
+gs.prf <- fread("../../Result/profile/final_genus_trim.tsv")
+sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
+
+taxa <- fread("../../Result/profile/taxonomy_levels.tsv")
+```
+
+
+### function
+
+1. top 5 phylum 
+
+2. top 20 species or genus
+
+```{r}
+get_tax_prf <- function(profile = sp.prf,
+                        metadata = phen,
+                        top = 20,
+                        kind = "Species"){
+  
+  # profile = sp.prf
+  # metadata = phen
+  # top = 20
+  # kind = "Species"
+  
+  prof <- profile %>% dplyr::rename(Tax=V1) %>%
+    inner_join(taxa %>% filter(Phylum%in%pm.prf$V1) %>%
+                 select(all_of(c("Phylum", kind))) %>% unique(),
+               by = c("Tax" = kind)) %>%
+    dplyr::select(Phylum, Tax, everything())
+  
+  mdat <- metadata %>% dplyr::select(c("SampleID", "Group")) %>%
+    inner_join(prof %>% dplyr::select(-c("Phylum")) %>%
+                 column_to_rownames("Tax") %>%
+                 t() %>% data.frame() %>%
+                 rownames_to_column("SampleID"),
+               by = "SampleID")
+    
+  mdat_mean_top <- mdat %>%
+    select(-c("SampleID", "Group")) %>%
+    summarise(across(everything(), mean)) %>%
+    tidyr::gather(key="Tax", value="Abundance") %>%
+    arrange(desc(Abundance)) %>%
+    slice(1:top) %>%
+    mutate(Tax=as.character(Tax))
+  
+  prf_final <- prof %>% filter(Tax%in%mdat_mean_top$Tax) 
+  
+  prf_table <- prf_final %>% select(-Phylum) %>%
+    mutate(Tax=factor(Tax, levels = mdat_mean_top$Tax)) %>%
+    dplyr::rename(OTU_ID=Tax)
+  
+  tax_table <- prf_final %>% select(Phylum, Tax) %>%
+    mutate(Phylum=factor(Phylum, levels = unique(prf_final$Phylum))) %>%
+    mutate(detail=paste0("p_", Phylum, ";s_", Tax)) %>%
+    select(detail, Phylum, Tax) %>%
+    setNames(c("detail", "phylum", "OTU_ID"))
+  
+  phe_table <- mdat %>% dplyr::select(SampleID, Group)
+  
+  res <- list(prftab=prf_table,
+              taxtab=tax_table,
+              phetab=phe_table)
+  return(res)
+}
+
+### circos
+circos_fun <- function(mdat_table = species_table,
+                       tag = "Species"){
+  
+  # mdat_table=species_table
+  # tag="Species"
+  
+  taxonomy <- mdat_table$taxtab 
+  otu_table <- mdat_table$prftab
+  group_info <- mdat_table$phetab
+  tax_phylum <- unique(taxonomy$phylum)
+  all_group <- unique(group_info$Group) 
+  
+  # merge table 
+  otutab <- inner_join(taxonomy, otu_table, by="OTU_ID") %>%
+    arrange(phylum, OTU_ID) %>%
+    column_to_rownames("OTU_ID") %>%
+    select(group_info$SampleID)
+  
+  # extra parameters 
+  all_otu <- rownames(otutab)
+  all_sample <- group_info$SampleID
+  all_ID <- c(all_otu, all_sample)
+  accum_otu <- rowSums(otutab)
+  accum_sample <- colSums(otutab)
+  all_ID_xlim <- cbind(rep(0, length(all_ID)), data.frame(c(accum_otu, accum_sample)))
+  
+  # inter parameters 
+  otutab$otu_ID <- all_otu
+  plot_data <- otutab %>% tidyr::gather(key="SampleID", value="value", -otu_ID) %>%
+    mutate(otu_ID=factor(otu_ID, levels = all_otu),
+           SampleID=factor(SampleID, levels = all_sample)) %>%
+    arrange(otu_ID, SampleID) 
+  plot_data <- plot_data[c(2, 1, 3, 3)]
+
+  # color 
+  names(color_otu) <- all_otu
+  number_samples <- data.frame(table(group_info$Group))
+  color_sample <- NULL
+  for(i in 1:nrow(number_samples)){
+    tmp <- colorRampPalette(c(grp.col[i], "white"))(50)[seq(1, number_samples$Freq[i], 1)]
+    color_sample <- c(color_sample, tmp)
+  }
+  names(color_sample) <- all_sample
+  color_group <- grp.col  
+  
+  # plot 
+  name <- paste0("../../Result/composition/", "circlize_", tag, ".pdf")
+  pdf(name, width = 20, height = 12)
+  circle_size = unit(1, "snpc")
+  
+  gap_size <- c(rep(3, length(all_otu) - 1), 6, rep(3, length(all_sample) - 1), 6)
+  circos.par(cell.padding = c(0, 0, 0, 0), start.degree = 270, gap.degree = gap_size)
+  circos.initialize(factors = factor(all_ID, levels = all_ID), xlim = all_ID_xlim)
+  
+  circos.trackPlotRegion(
+  	ylim = c(0, 1), track.height = 0.03, bg.border = NA, 
+  	panel.fun = function(x, y) {
+  		sector.index = get.cell.meta.data("sector.index")
+  		xlim = get.cell.meta.data("xlim")
+  		ylim = get.cell.meta.data("ylim")
+  	} )
+  
+  for (i in 1:length(tax_phylum)) {
+  	tax_OTU <- {subset(taxonomy, phylum == tax_phylum[i])}$OTU_ID
+  	highlight.sector(tax_OTU, track.index = 1, col = color_phylum[i], 
+  	                 text = tax_phylum[i], cex = 0.5, text.col = "black",
+  	                 niceFacing = FALSE)
+  }
+  
+  for (i in 1:length(all_group)) {
+  	group_sample <- {subset(group_info, Group == all_group[i])}$SampleID
+  	highlight.sector(group_sample, track.index = 1, col = color_group[i], 
+  	                 text = all_group[i], cex = 0.7, text.col = 'black', 
+  	                 niceFacing = FALSE)
+  }
+  
+
+  circos.trackPlotRegion(
+  	ylim = c(0, 1), track.height = 0.05, bg.border = NA, 
+  	panel.fun = function(x, y) {
+  		sector.index = get.cell.meta.data('sector.index')
+  		xlim = get.cell.meta.data('xlim')
+  		ylim = get.cell.meta.data('ylim')
+  	} )
+  
+  circos.track(
+  	track.index = 2, bg.border = NA, 
+  	panel.fun = function(x, y) {
+  		xlim = get.cell.meta.data('xlim')
+  		ylim = get.cell.meta.data('ylim')
+  		sector.name = get.cell.meta.data('sector.index')
+  		xplot = get.cell.meta.data('xplot')
+  		
+  		by = ifelse(abs(xplot[2] - xplot[1]) > 30, 0.25, 1)
+  		for (p in c(0, seq(by, 1, by = by))) circos.text(p*(xlim[2] - xlim[1]) + xlim[1], mean(ylim) + 0.4, paste0(p*100, '%'), cex = 0.4, adj = c(0.5, 0), niceFacing = FALSE)
+  		
+  		circos.lines(xlim, c(mean(ylim), mean(ylim)), lty = 3)
+  	} )
+  
+  circos.trackPlotRegion(
+  	ylim = c(0, 1), track.height = 0.03, 
+  	bg.col = c(color_otu, color_sample), 
+  	bg.border = NA, track.margin = c(0, 0.01),
+  	panel.fun = function(x, y) {
+  		xlim = get.cell.meta.data('xlim')
+  		sector.name = get.cell.meta.data('sector.index')
+  		circos.axis(h = 'top', labels.cex = 0.4, 
+  		            major.tick.percentage = 0.4, labels.niceFacing = FALSE)
+  		circos.text(mean(xlim), 0.2, sector.name, cex = 0.4, 
+  		            niceFacing = FALSE, adj = c(0.5, 0))
+  	} )
+  
+  circos.trackPlotRegion(ylim = c(0, 1), track.height = 0.03, track.margin = c(0, 0.01))
+  
+  for (i in seq_len(nrow(plot_data))) {
+  	circos.link(
+  		plot_data[i,2], c(accum_otu[plot_data[i,2]], 
+  		                  accum_otu[plot_data[i,2]] - plot_data[i,4]),
+  		plot_data[i,1], c(accum_sample[plot_data[i,1]], 
+  		                  accum_sample[plot_data[i,1]] - plot_data[i,3]),
+  		col = paste0(color_otu[plot_data[i,2]], '70'), border = NA )
+  	
+  	circos.rect(accum_otu[plot_data[i,2]], 0, 
+  	            accum_otu[plot_data[i,2]] - plot_data[i,4], 1, 
+  	            sector.index = plot_data[i,2], 
+  	            col = color_sample[plot_data[i,1]], border = NA)
+  	circos.rect(accum_sample[plot_data[i,1]], 0, 
+  	            accum_sample[plot_data[i,1]] - plot_data[i,3], 1, 
+  	            sector.index = plot_data[i,1], 
+  	            col = color_otu[plot_data[i,2]], border = NA)
+  	
+  	accum_otu[plot_data[i,2]] = accum_otu[plot_data[i,2]] - plot_data[i,4]
+  	accum_sample[plot_data[i,1]] = accum_sample[plot_data[i,1]] - plot_data[i,3]
+  }
+  
+  otu_legend <- Legend(
+  		at = all_otu, labels = taxonomy$detail, labels_gp = gpar(fontsize = 8),    
+  		grid_height = unit(0.5, 'cm'), grid_width = unit(0.5, 'cm'), 
+  		type = 'points', pch = NA, background = color_otu)
+  
+  pushViewport(viewport(x = 0.85, y = 0.5))
+  grid.draw(otu_legend)
+  upViewport()
+  		
+  circos.clear()
+  dev.off()
+}
+```
+
+
+### Species
+```{r}
+species_table <- get_tax_prf(profile = sp.prf, top = 25, kind = "Species")
+circos_fun(mdat_table = species_table, tag = "Species")
+```
+
+### genus
+```{r}
+genus_table <- get_tax_prf(profile = gs.prf, top = 20, kind = "Genus")
+circos_fun(mdat_table = genus_table, tag = "Genus")
+```
+
+### version
+```{r}
+sessionInfo()
+```

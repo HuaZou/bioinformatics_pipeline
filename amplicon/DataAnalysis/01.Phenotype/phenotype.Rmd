@@ -1,0 +1,90 @@
+---
+title: "phenotype"
+date: "Created: 2021-01-11 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+```
+
+
+### load phenotype
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+```
+
+### group information
+```{r}
+with(phen, table(Group, Sex))
+```
+
+
+### Sex 
+```{r}
+with(phen, chisq.test(Group, Sex))
+```
+
+### Age
+```{r}
+wilcox.test(Age ~ Group, data = phen)
+```
+
+
+### other clincal parameters 
+```{r}
+ncolumns <- c(1, 4, 13:ncol(phen))
+dat <- phen[, ncolumns] %>%
+  mutate(Group = factor(Group))
+datphen <- dat[, c(1:2)]
+datprof <- dat[, c(1, 3:ncol(dat))]
+
+fr <- levels(datphen$Group)
+res <- apply(datprof[, -1], 2, function(x, group){
+  df <- data.frame(Value=x, Group=group) %>% na.omit()
+  num <- as.numeric(table(df$Group))
+  
+  pval <- t.test(Value ~ Group, data = df)$p.value
+  mn <- with(df, tapply(Value, Group, mean))
+  if ( mn[1] > mn[2]) {
+      enrich <- fr[1]
+  } else {
+      enrich <- fr[2]
+  }
+  
+  sd <- with(df, tapply(Value, Group, sd))
+  mn_sd <- c(paste(signif(mn[1], 3), signif(sd[1], 3), sep = "+/-"),
+             paste(signif(mn[2], 3), signif(sd[2], 3), sep = "+/-"))
+  res <- c(pval, num, enrich, mn_sd)
+  return(res)
+}, datphen$Group) %>% 
+  t() %>% data.frame() %>%
+  setNames(c("Pvalue", paste0(fr, "_Number"), 
+             "Enrichment", paste0(fr, "_MeanSD"))) %>%
+  rownames_to_column("ClincalParam")
+
+DT::datatable(res)
+```
+
+
+### output
+```{r}
+dir <- "../../Result/clinical_parameters"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+
+# species
+path <- paste(dir, "clinical_parameters_summary.csv", sep = "/")
+write.csv(res, file = path, row.names = F)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

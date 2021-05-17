@@ -1,0 +1,173 @@
+---
+title: "microbiota composition: heatmap"
+date: "Created: 2021-01-12 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(convert)
+library(ggplot2)
+library(pheatmap)
+library(RColorBrewer)
+library(ggplotify)
+
+grp <- c("lupus", "Control")
+grp.col <- c("#283891", "#C1272D")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+pm.prf <- fread("../../Result/profile/final_phylum_trim.tsv") 
+gs.prf <- fread("../../Result/profile/final_genus_trim.tsv")
+sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
+```
+
+
+### function 
+```{r}
+get_expr_Set <- function(profile=pm.prf,
+                         metadata=phen){
+
+  # profile=pm.prf
+  # metadata=phen
+  
+  prof <- profile %>% column_to_rownames("V1")%>% 
+    t() %>% data.frame() %>% 
+    rownames_to_column("SampleID") 
+  
+  sid <- intersect(metadata$SampleID, prof$SampleID)
+  phe <- metadata %>% filter(SampleID%in%sid) %>%
+    mutate(Group=factor(Group, levels = grp)) %>%
+    column_to_rownames("SampleID")
+  prf <- prof %>% filter(SampleID%in%sid) %>%
+    column_to_rownames("SampleID") %>%
+    t() %>% data.frame() %>%
+    select(as.character(rownames(phe)))
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prf)){ 
+    if (!(colnames(prf)[i] == rownames(phe)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  exprs <- as.matrix(prf)
+  adf <-  new("AnnotatedDataFrame", data=phe)
+  experimentData <- new("MIAME",
+        name="Xiaohong Xin", lab="Xin Lab",
+        contact="731351504@qq.com",
+        title="Lupus",
+        abstract="The raletive abundance profile",
+        url="731351504@qq.com",
+        other=list(notes="Created from text files"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  
+  return(expressionSet)
+}
+
+### pheatmap function
+heatFun <- function(expr_set=pm_expr_set,
+                    cellW=10,
+                    cellH=15){
+  
+  # expr_set=pm_expr_set
+
+  dat <- exprs(expr_set) 
+  # Choose which column variables you want to annotate the columns by.
+  annotation_col <- data.frame(
+      Group=factor(expr_set$Group),
+      row.names=colnames(expr_set)
+  )
+  
+  match_color <- function(grp_lab){
+  
+      grp_idx <- pmatch(grp_lab, grp)
+      
+      grp_lab_col <- grp.col[grp_idx]
+      
+      res <- list(Group=grp_lab_col)
+      return(res)
+  }
+  
+  ann_colors <- match_color(unique(as.character(expr_set$Group)))
+  names(ann_colors$Group) <- unique(as.character(expr_set$Group))
+  newnames <- lapply(rownames(dat), function(x){bquote(italic(.(x)))})
+  
+  pheatmap(mat = dat, 
+           color = colorRampPalette(c("blue", "white", "red"))(50),
+           scale = "row", 
+           annotation_col = annotation_col, 
+           annotation_colors = ann_colors,  
+           cluster_row = TRUE, 
+           cluster_cols = FALSE,
+           fontsize = 10, 
+           cellwidth = cellW, 
+           cellheight = cellH,
+           show_colnames = T,
+           show_rownames = T,
+           legend_breaks = c(seq(-5, 5, 1), 6),
+           legend_labels = c(as.character(c(seq(-5, 5, 1))),
+                             "Relative abundance(Z-score)\n"),
+           legend = TRUE,
+           treeheight_row = 0,
+           labels_row = as.expression(newnames))
+}
+```
+
+
+### species
+```{r, fig.height=5, fig.width=12}
+sp_expr_set <- get_expr_Set(profile = sp.prf)
+sppl <- as.ggplot(heatFun(expr_set = sp_expr_set, cellW = 8, cellH = 4))
+
+dir <- "../../Result/composition"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+species.path <- paste(dir, "heatmap_species.pdf", sep = "/")
+ggsave(filename = species.path, plot = sppl, width = 12, height = 10, dpi = 600)
+```
+
+
+### genus
+```{r, fig.height=5, fig.width=12}
+gs_expr_set <- get_expr_Set(profile = gs.prf)
+gspl <- as.ggplot(heatFun(expr_set = gs_expr_set, cellW = 8, cellH = 8))
+
+dir <- "../../Result/composition"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+genus.path <- paste(dir, "heatmap_genus.pdf", sep = "/")
+ggsave(filename = genus.path, plot = gspl, width = 12, height = 10, dpi = 600)
+```
+
+
+### phylum
+```{r, fig.height=5, fig.width=12}
+pm_expr_set <- get_expr_Set(profile = pm.prf)
+pmpl <- as.ggplot(heatFun(expr_set = pm_expr_set, cellW = 8, cellH = 8))
+
+dir <- "../../Result/composition"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+phylum.path <- paste(dir, "heatmap_phylum.pdf", sep = "/")
+ggsave(filename = phylum.path, plot = pmpl, width = 10, height = 5, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

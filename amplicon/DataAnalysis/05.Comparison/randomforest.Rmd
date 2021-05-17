@@ -1,0 +1,733 @@
+---
+title: "RandomForest classifier"
+date: "Created: 2021-01-12 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(randomForest)
+library(ggplot2)
+library(caret)
+library(pROC)
+
+grp <- c("lupus", "Control")
+tax.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A",
+             "#993116", "#6798CE", "#146666", "#CE9924", "#6D659D",
+             "#9F9B27", "#6D659D", "#9F9B27", "#C80b8A", "#2C3A89",
+             "#C8C5C5", "#90E2BF", "#FDAB4D", "#F4F4E8", "#B054BF",
+             "#FCE873", "#FFCCDB", "#AFD300", "#B089D8", "#F96E6F",
+             "#AAD3ED", "#639BCE")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+pm.prf <- fread("../../Result/profile/final_phylum_trim.tsv") 
+gs.prf <- fread("../../Result/profile/final_genus_trim.tsv")
+sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
+
+taxonomy <- fread("../../Result/profile/taxonomy_levels.tsv")
+```
+
+
+### Function
+```{r}
+Rf_fun <- function(profile = sp.prf,
+                   metadata = phen,
+                   taxa = taxonomy,
+                   kind = "Species"){
+  
+  # profile = all.prf
+  # metadata = phen
+  # taxa = taxonomy
+  # kind = "all"
+  
+  sid <- intersect(phen$SampleID, colnames(profile))
+  phe <- phen %>% filter(SampleID%in%sid)
+  prf <- profile %>% column_to_rownames("V1") %>%
+    dplyr::select(all_of(sid)) %>%
+    t() %>% data.frame()
+  
+  mdat <- inner_join(phe %>% select(SampleID, Group),
+                     prf %>% rownames_to_column("SampleID"),
+                     by = "SampleID") %>%
+    column_to_rownames("SampleID") %>%
+    mutate(Group=factor(Group))
+  
+  # build model
+  set.seed(123)
+  samples <- createDataPartition(mdat$Group, p = 0.8, list = F)
+  trainData <- mdat[samples, ]
+  testData <- mdat[-samples, ]
+  myControl = trainControl(method = "repeatedcv", 
+                           classProbs = T,
+                           number = 10,
+                           repeats = 3,
+                           summaryFunction = prSummary,
+                           verboseIter = TRUE)
+  model_rf <- train(Group ~., 
+                    data = trainData,
+                    method = "rf",
+                    trControl = myControl,
+                    verbose = FALSE,
+                    tuneLength=15,
+                    metric = "AUC")
+  
+  pred <- predict(model_rf, newdata = testData)
+  print(confusionMatrix(pred, testData$Group))
+  
+  # difine roc and calculate AUC
+  rocobj <- roc(testData$Group, predict(model_rf, testData, type = "prob")[, grp[1]])
+  auc <- round(auc(testData$Group, predict(model_rf, testData, type = "prob")[, grp[1]]),4)
+  plotroc <- tibble(tpr = rocobj$sensitivities,
+                   fpr = 1 - rocobj$specificities)
+  plroc <- ggplot(data = plotroc, aes(x=fpr, y=tpr))+
+            geom_path(color="black", size = 1)+
+            geom_abline(intercept = 0, slope = 1, color="grey", size = 1, linetype=2)+
+            labs(x = "False Positive Rate (1 - Specificity)",
+                 y = "True Positive Rate (Sensivity or Recall)")+
+            annotate("text",x = .75, y = .25,label=paste("AUC =", auc),
+                     size = 5, family="serif")+
+            coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))+
+            theme_bw()+
+            theme(panel.background = element_rect(fill = 'transparent'),
+                  axis.ticks.length = unit(0.4, "lines"), 
+                  axis.ticks = element_line(color='black'),
+                  axis.line = element_line(size=.5, colour = "black"),
+                  axis.title = element_text(colour='black', size=12,face = "bold"),
+                  axis.text = element_text(colour='black',size=10,face = "bold"),
+                  text = element_text(size=8, color="black", family="serif"))
+  
+  # features
+  if(kind == "Phylum"){
+    dat_tax <- taxa %>% dplyr::select(one_of("Phylum")) %>%
+      mutate(features=Phylum)
+  }else if(kind == "all"){
+    dat_tax_sp <- taxa %>% dplyr::select(c("Phylum", "Species")) %>% 
+      unique() %>% setNames(c("Phylum", "features"))
+    dat_tax_gs <- taxa %>% dplyr::select(c("Phylum", "Genus")) %>% 
+      unique() %>% setNames(c("Phylum", "features"))
+    dat_tax_pm <- taxa %>% dplyr::select(one_of("Phylum")) %>%
+      unique() %>% mutate(features=Phylum)
+    dat_tax <- rbind(dat_tax_sp, dat_tax_gs, dat_tax_pm)
+  }else{
+    dat_tax <- taxa %>% dplyr::select(c("Phylum", kind)) %>%
+      unique() 
+    colnames(dat_tax)[which(colnames(dat_tax) == kind)] <- "features"    
+  }
+  imp <- varImp(model_rf, scale = TRUE)$importance %>% 
+          setNames("Importance") %>%
+          rownames_to_column("features") %>%
+          arrange(desc(Importance)) %>%
+          dplyr::slice(1:model_rf$bestTune$mtry) %>%
+          inner_join(dat_tax, by = "features") %>%
+          mutate(Phylum=factor(Phylum))
+  
+  phly.fr <- levels(imp$Phylum)
+  phly.col <- tax.col[1:length(phly.fr)]
+  
+  imp$features <- factor(imp$features, levels = rev(as.character(imp$features)))
+  
+  plfeature <- ggplot(imp, aes(x=features, y=Importance, fill=Phylum)) + 
+    geom_bar(stat="identity", color="black")+
+    xlab("")+
+    coord_flip()+
+    scale_fill_manual(values = phly.col, labels = phly.fr)+
+    theme_classic()+
+    theme(panel.background = element_blank(),
+          panel.grid = element_blank(),
+          axis.line.x = element_line(size=.5, colour="black"),
+          axis.line.y = element_line(size=.5, colour="black"),
+          axis.ticks = element_line(color="black"),
+          axis.title = element_text(color="black", size=12, face="bold"),
+          axis.text.y = element_text(color="black", size=10, face="italic"),
+          legend.position = "right",
+          legend.background = element_blank(),
+          legend.key = element_blank(),
+          legend.text = element_text(size=8, face="italic"),
+          text = element_text(size=8, color="black", family="serif"))
+  
+  res <- list(model=model_rf, 
+              plroc=plroc, 
+              plfeature=plfeature,
+              score_features=imp)
+  
+  return(res)
+}
+```
+
+
+### species
+```{r}
+species_rf <- Rf_fun(profile = sp.prf, metadata = phen, taxa = taxonomy, kind = "Species")
+species_rf$plroc
+species_rf$plfeature
+
+dir <- "../../Result/randomforest"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+species.roc <- paste(dir, "species_rf_roc.pdf", sep = "/")
+ggsave(filename = species.roc, plot = species_rf$plroc, width = 7, height = 5, dpi = 600)
+
+species.feature <- paste(dir, "species_rf_feature.pdf", sep = "/")
+ggsave(filename = species.feature, plot = species_rf$plfeature, width = 7, height = 9, dpi = 600)
+
+write.csv(species_rf$score_features, "../../Result/randomforest/species_biomarker_rf.csv", row.names = F)
+```
+
+### genus
+```{r}
+genus_rf <- Rf_fun(profile = gs.prf, metadata = phen, taxa = taxonomy, kind = "Genus")
+genus_rf$plroc
+genus_rf$plfeature
+
+dir <- "../../Result/randomforest"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+genus.roc <- paste(dir, "genus_rf_roc.pdf", sep = "/")
+ggsave(filename = genus.roc, plot = genus_rf$plroc, width = 7, height = 5, dpi = 600)
+
+genus.feature <- paste(dir, "genus_rf_feature.pdf", sep = "/")
+ggsave(filename = genus.feature, plot = genus_rf$plfeature, width = 7, height = 9, dpi = 600)
+
+write.csv(genus_rf$score_features, "../../Result/randomforest/genus_biomarker_rf.csv", row.names = F)
+```
+
+### cbine all the three levels tax
+```{r}
+all.prf <- rbind(sp.prf, gs.prf, pm.prf)
+
+all_rf <- Rf_fun(profile = all.prf, metadata = phen, taxa = taxonomy, kind = "all")
+all_rf$plroc
+all_rf$plfeature
+
+dir <- "../../Result/randomforest"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+all.roc <- paste(dir, "all_Tax_rf_roc.pdf", sep = "/")
+ggsave(filename = all.roc, plot = all_rf$plroc, width = 7, height = 5, dpi = 600)
+
+all.feature <- paste(dir, "all_Tax_rf_feature.pdf", sep = "/")
+ggsave(filename = all.feature, plot = all_rf$plfeature, width = 7, height = 15, dpi = 600)
+
+write.csv(all_rf$score_features, "../../Result/randomforest/all_biomarker_rf.csv", row.names = F)
+```
+
+
+### reanalysis 
+
+I have never thought the `preprecess` of the data before I ran the randomforest analysis. I was so confused on how to choose the biomarkers which generated by the randomforest model. After searching some material from the internet, I realized that there were so many mistakes on the former data analysis. For example, the `multicollinearity` of the features maybe had negative effects on the model. In fact, `randomforest` was based on the `CART` algorithm, using the `Gini index`, I have no idea for remove or filter the multicollinearity. 
+
+To get the potential markers, there are two approaches: one is Recursive feature selection, using all the features to calculate the model effects, then remaining the most important features, and then recursive these steps to find the proper variables; the other is removing the latent multicollinearity variables, then normalize the clean data, and tuning the parameters.
+
+![](randomforest.jpg)
+
+List the follow precedures for the reanalysis:
+
+* removing latent multicollinearity variables via *findCorrelation* (Notes: the filtered features maybe also affect the status)
+
+* normalizing the data and filling the missing values via *preProcess*
+
+* selecting features before training model via *rfe* and *rfeControl*
+
+* Data Splitting via *createDataPartition* (Simple Splitting Based on the Outcome)
+
+* Model Training and Tuning 
+
+```{r}
+reRf_fun <- function(profile = sp.prf,
+                     metadata = phen,
+                     taxa = taxonomy,
+                     kind = "Species"){
+  
+  # profile = sp.prf
+  # metadata = phen
+  # taxa = taxonomy
+  # kind = "Species"
+  
+  sid <- intersect(phen$SampleID, colnames(profile))
+  phe <- phen %>% filter(SampleID%in%sid)
+  prf <- profile %>% column_to_rownames("V1") %>%
+    dplyr::select(all_of(sid)) %>%
+    t() %>% data.frame()
+  
+  mdat <- inner_join(phe %>% select(SampleID, Group),
+                     prf %>% rownames_to_column("SampleID"),
+                     by = "SampleID") %>%
+          mutate(Group=factor(Group)) %>%
+          column_to_rownames("SampleID")
+
+  # step1: remove multicollinearity 
+  feature_cor <- Hmisc::rcorr(as.matrix(mdat[, -1]), type = "spearman")
+  index_cor <-  findCorrelation(feature_cor$r, cutoff = 0.6, verbose = TRUE)
+  feature_remain <- feature_cor$r[-index_cor, -index_cor]
+  mdat_remain <- mdat %>% dplyr::select(c("Group", rownames(feature_remain)))
+  
+  # feature_remain <- findLinearCombos(mdat[, -1])
+  # mdat_remain <- mdat[, -feature_remain$remove]
+
+  # step2: selecting features 
+  rfeControl_value <- rfeControl(functions = rfFuncs,
+                                 number = 200,
+                                 #method = "cv",
+                                 rerank = TRUE,
+                                 verbose = FALSE)
+  feature_breaks <- c(2:19, seq(20, ncol(mdat_remain), 5))
+  set.seed(123)
+  rfe_profile <- rfe(mdat_remain[, -1], mdat_remain$Group,
+                     sizes = feature_breaks,
+                     rfeControl = rfeControl_value)
+  # plot
+  plotacc <- tibble(Accuracy = signif(rfe_profile$results$Accuracy, 3),
+                    Variables = rfe_profile$results$Variables) %>%
+    mutate(label=ifelse(Accuracy == max(Accuracy), 
+                        paste0("(Features=", Variables, ", Accuracy=", Accuracy,")"), NA))
+  plrfe <- ggplot(data = plotacc, aes(x=Variables, y=Accuracy))+
+            geom_point(color="grey", size = 3, shape=19)+
+            geom_text(aes(label = label), nudge_y = -0.002)+
+            annotate(geom = "point", 
+                     x = plotacc[grep(max(plotacc$Accuracy), plotacc$Accuracy), ]$Variables, 
+                     y = max(plotacc$Accuracy), colour = "red", size = 4) + 
+            # annotate(geom = "text",x = max(plotacc$Variables), 
+            #          y = max(plotacc$Accuracy), label = "subaru", hjust = "left")+
+            labs(x = "Features (Numbers)",
+                 y = "Accuracy (Bootstrap)")+
+            theme_bw()+
+            theme(panel.background = element_rect(fill = 'transparent'),
+                  axis.ticks.length = unit(0.4, "lines"), 
+                  axis.ticks = element_line(color='black'),
+                  axis.line = element_line(size=.5, colour = "black"),
+                  axis.title = element_text(colour='black', size=12,face = "bold"),
+                  axis.text = element_text(colour='black',size=10,face = "bold"),
+                  text = element_text(size=8, color="black", family="serif"))  
+  
+  mdat_remain_v2 <- mdat_remain %>% dplyr::select(c("Group", rfe_profile$optVariables))
+  
+  # step3: data splitting
+  set.seed(123)
+  samples <- createDataPartition(mdat_remain_v2$Group, p = 0.7, list = F)
+  trainData <- mdat_remain_v2[samples, ]
+  testData <- mdat_remain_v2[-samples, ]
+  
+  # step4: normalization
+  mdat_preProcess <- preProcess(mdat_remain_v2, method = c("center", "scale"))
+  trainTransformed <- predict(mdat_preProcess, trainData)
+  testTransformed <- predict(mdat_preProcess, testData)
+  
+  # step5: build model
+  set.seed(123)
+  myControl = trainControl(method = "cv", 
+                           classProbs = T,
+                           number = 10,
+                           summaryFunction = prSummary,
+                           verboseIter = TRUE)
+  model_rf <- train(Group ~., 
+                     data = trainTransformed,
+                     method = "rf",
+                     trControl = myControl,
+                     verbose = FALSE,
+                     metric = "AUC")
+  
+  pred <- predict(model_rf, newdata = testTransformed)
+  print(confusionMatrix(pred, testTransformed$Group))
+  
+  # step6: difine roc and calculate AUC
+  rocobj <- roc(testTransformed$Group, predict(model_rf, testTransformed, type = "prob")[, grp[1]])
+  auc <- round(auc(testTransformed$Group, predict(model_rf, testTransformed, type = "prob")[, grp[1]]),4)
+  plotroc <- tibble(tpr = rocobj$sensitivities,
+                   fpr = 1 - rocobj$specificities)
+  plroc <- ggplot(data = plotroc, aes(x=fpr, y=tpr))+
+            geom_path(color="black", size = 1)+
+            geom_abline(intercept = 0, slope = 1, color="grey", size = 1, linetype=2)+
+            labs(x = "False Positive Rate (1 - Specificity)",
+                 y = "True Positive Rate (Sensivity or Recall)")+
+            annotate("text",x = .75, y = .25,label=paste("AUC =", auc),
+                     size = 5, family="serif")+
+            coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))+
+            theme_bw()+
+            theme(panel.background = element_rect(fill = 'transparent'),
+                  axis.ticks.length = unit(0.4, "lines"), 
+                  axis.ticks = element_line(color='black'),
+                  axis.line = element_line(size=.5, colour = "black"),
+                  axis.title = element_text(colour='black', size=12,face = "bold"),
+                  axis.text = element_text(colour='black',size=10,face = "bold"),
+                  text = element_text(size=8, color="black", family="serif"))
+  
+  # step7: the most important features
+  if(kind == "Phylum"){
+    dat_tax <- taxa %>% dplyr::select(one_of("Phylum")) %>%
+      mutate(features=Phylum)
+  }else if(kind == "all"){
+    dat_tax_sp <- taxa %>% dplyr::select(c("Phylum", "Species")) %>% 
+      unique() %>% setNames(c("Phylum", "features"))
+    dat_tax_gs <- taxa %>% dplyr::select(c("Phylum", "Genus")) %>% 
+      unique() %>% setNames(c("Phylum", "features"))
+    dat_tax_pm <- taxa %>% dplyr::select(one_of("Phylum")) %>%
+      unique() %>% mutate(features=Phylum)
+    dat_tax <- rbind(dat_tax_sp, dat_tax_gs, dat_tax_pm)
+  }else{
+    dat_tax <- taxa %>% dplyr::select(c("Phylum", kind)) %>%
+      unique() 
+    colnames(dat_tax)[which(colnames(dat_tax) == kind)] <- "features"    
+  }
+  imp <- varImp(model_rf, scale = TRUE)$importance %>% 
+          setNames("Importance (Accuracy)") %>%
+          rownames_to_column("features") %>%
+          arrange(desc(Importance)) %>%
+          # dplyr::slice(1:num) %>%
+          inner_join(dat_tax, by = "features") %>%
+          mutate(Phylum=factor(Phylum))
+  
+  phly.fr <- levels(imp$Phylum)
+  phly.col <- tax.col[1:length(phly.fr)]
+  
+  imp$features <- factor(imp$features, levels = rev(as.character(imp$features)))
+  
+  plfeature <- ggplot(imp, aes(x=features, y=Importance, fill=Phylum)) + 
+    geom_bar(stat="identity", color="black")+
+    xlab("")+
+    coord_flip()+
+    scale_fill_manual(values = phly.col, labels = phly.fr)+
+    theme_classic()+
+    theme(panel.background = element_blank(),
+          panel.grid = element_blank(),
+          axis.line.x = element_line(size=.5, colour="black"),
+          axis.line.y = element_line(size=.5, colour="black"),
+          axis.ticks = element_line(color="black"),
+          axis.title = element_text(color="black", size=12, face="bold"),
+          axis.text.y = element_text(color="black", size=10, face="italic"),
+          legend.position = "right",
+          legend.background = element_blank(),
+          legend.key = element_blank(),
+          legend.text = element_text(size=8, face="italic"),
+          text = element_text(size=8, color="black", family="serif"))
+  
+  res <- list(plrfe=plrfe,
+              plmodel=model_rf, 
+              plroc=plroc, 
+              plfeature=plfeature,
+              score_feature=imp)
+  return(res)
+}
+```
+
+
+### cbine all the three levels tax
+```{r}
+all.prf <- rbind(sp.prf, gs.prf, pm.prf)
+
+all_rf <- reRf_fun(profile = all.prf, metadata = phen, taxa = taxonomy, kind = "all")
+all_rf$plroc
+all_rf$plfeature
+
+dir <- "../../Result/randomforest"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+all.roc <- paste(dir, "all_Tax_rf_roc_v2.pdf", sep = "/")
+ggsave(filename = all.roc, plot = all_rf$plroc, width = 7, height = 5, dpi = 600)
+
+all.feature <- paste(dir, "all_Tax_rf_feature_v2.pdf", sep = "/")
+ggsave(filename = all.feature, plot = all_rf$plfeature, width = 7, height = 9, dpi = 600)
+
+write.csv(all_rf$score_features, "../../Result/randomforest/all_biomarker_rf_v2.csv", row.names = F)
+```
+
+
+### reanalysis Jan 14 2021
+
+`Tuning Randomforest Algorithms` to choose the important features which contribute to the best performance
+
+* mtry: Number of variables randomly sampled as candidates at each split.
+
+* ntree: Number of trees to grow.
+
+* Accuracy and Kappa index for classification
+
+* MSE for regression
+
+```{r}
+reRf_fun2 <- function(profile = sp.prf,
+                      metadata = phen,
+                      taxa = taxonomy,
+                      kind = "Species"){
+  
+  # profile = sp.prf
+  # metadata = phen
+  # taxa = taxonomy
+  # kind = "Species"
+  
+  sid <- intersect(phen$SampleID, colnames(profile))
+  phe <- phen %>% filter(SampleID%in%sid)
+  prf <- profile %>% column_to_rownames("V1") %>%
+    dplyr::select(all_of(sid)) %>%
+    t() %>% data.frame()
+  
+  mdat <- inner_join(phe %>% select(SampleID, Group),
+                     prf %>% rownames_to_column("SampleID"),
+                     by = "SampleID") %>%
+          mutate(Group=factor(Group)) %>%
+          column_to_rownames("SampleID")
+
+  # step1: remove multicollinearity 
+  feature_cor <- Hmisc::rcorr(as.matrix(mdat[, -1]), type = "spearman")
+  index_cor <-  findCorrelation(feature_cor$r, cutoff = 0.6, verbose = TRUE)
+  feature_remain <- feature_cor$r[-index_cor, -index_cor]
+  mdat_remain <- mdat %>% dplyr::select(c("Group", rownames(feature_remain)))
+
+  # step2: selecting features 
+  rfeControl_value <- rfeControl(functions = rfFuncs,
+                                 number = 20,  # default 200
+                                 method = "cv",
+                                 rerank = TRUE,
+                                 verbose = TRUE)
+  feature_breaks <- seq(2, ncol(mdat_remain), 2)
+  set.seed(123)
+  rfe_profile <- rfe(mdat_remain[, -1], mdat_remain$Group,
+                     sizes = feature_breaks,
+                     rfeControl = rfeControl_value)
+  # plot rfe_profile
+  plotacc <- tibble(Accuracy = signif(rfe_profile$results$Accuracy, 3),
+                    Variables = rfe_profile$results$Variables) %>%
+             mutate(label=ifelse(Accuracy == max(Accuracy), 
+                        paste0("(Features=", Variables, ", Accuracy=", Accuracy,")"), NA))
+  
+  plrfe <- ggplot(data = plotacc, aes(x=Variables, y=Accuracy))+
+            geom_point(color="grey", size = 3, shape=19)+
+            geom_line(color="black", linetype = 1, size = 1)+
+            geom_text(aes(label = label), nudge_y = -0.002)+
+            annotate(geom = "point", 
+                     x = plotacc[grep(max(plotacc$Accuracy), plotacc$Accuracy), ]$Variables, 
+                     y = max(plotacc$Accuracy), colour = "red", size = 4) + 
+            labs(x = "Features (Numbers)",
+                 y = "Accuracy (Bootstrap)")+
+            theme_bw()+
+            theme(panel.background = element_rect(fill = 'transparent'),
+                  axis.ticks.length = unit(0.4, "lines"), 
+                  axis.ticks = element_line(color='black'),
+                  axis.line = element_line(size=.5, colour = "black"),
+                  axis.title = element_text(colour='black', size=12,face = "bold"),
+                  axis.text = element_text(colour='black',size=10,face = "bold"),
+                  text = element_text(size=8, color="black", family="serif"))  
+  
+  mdat_remain_v2 <- mdat_remain %>% dplyr::select(c("Group", rfe_profile$optVariables))
+  
+  # step3: data splitting
+  set.seed(123)
+  samples <- createDataPartition(mdat_remain_v2$Group, p = 0.8, list = F)
+  trainData <- mdat_remain_v2[samples, ]
+  testData <- mdat_remain_v2[-samples, ]
+  
+  # step4: normalization
+  mdat_preProcess <- preProcess(mdat_remain_v2, method = c("center", "scale"))
+  trainTransformed <- predict(mdat_preProcess, trainData)
+  testTransformed <- predict(mdat_preProcess, testData)
+  
+  # build model
+  myControl = trainControl(method = "repeatedcv", 
+                           number = 10,
+                           repeats = 3,
+                           search = "random",
+                           verboseIter = TRUE)
+  
+  model_rf <- train(Group ~., 
+                    data = trainTransformed,
+                    method = "rf",
+                    trControl = myControl,
+                    tuneLength = 15,
+                    metric = "Accuracy",
+                    verbose = TRUE)
+  # plot(model_rf)
+  plmodel_data <- tibble(Feartures = model_rf$results$mtry,
+                         Accuracy = signif(model_rf$results$Accuracy, 3)) %>%
+             mutate(label=ifelse(Accuracy == max(Accuracy), 
+                        paste0("(Features=", Feartures, ", Accuracy=", Accuracy,")"), NA))
+  
+  plmodel <- ggplot(data = plmodel_data, aes(x=Feartures, y=Accuracy))+
+            geom_point(color="grey", size = 3, shape=19)+
+            geom_line(color="black", linetype = 1, size = 1)+
+            geom_text(aes(label = label), nudge_y = -0.002)+
+            annotate(geom = "point", 
+                     x = plmodel_data[grep(max(plmodel_data$Accuracy), plmodel_data$Accuracy), ]$Feartures, 
+                     y = max(plmodel_data$Accuracy), colour = "red", size = 4) + 
+            labs(x = "Randomly Selected Predictors",
+                 y = "Accuracy (Repeated Cross-Validation)")+
+            theme_bw()+
+            theme(panel.background = element_rect(fill = 'transparent'),
+                  axis.ticks.length = unit(0.4, "lines"), 
+                  axis.ticks = element_line(color='black'),
+                  axis.line = element_line(size=.5, colour = "black"),
+                  axis.title = element_text(colour='black', size=12,face = "bold"),
+                  axis.text = element_text(colour='black',size=10,face = "bold"),
+                  text = element_text(size=8, color="black", family="serif"))  
+  
+  pred <- predict(model_rf, newdata = testTransformed)
+  print(confusionMatrix(pred, testData$Group))
+  
+  # difine roc and calculate AUC
+  rocobj <- roc(testTransformed$Group, predict(model_rf, testTransformed, type = "prob")[, grp[1]])
+  auc <- round(auc(testTransformed$Group, predict(model_rf, testTransformed, type = "prob")[, grp[1]]),4)
+  plotroc <- tibble(tpr = rocobj$sensitivities,
+                   fpr = 1 - rocobj$specificities)
+  plroc <- ggplot(data = plotroc, aes(x=fpr, y=tpr))+
+            geom_path(color="black", size = 1)+
+            geom_abline(intercept = 0, slope = 1, color="grey", size = 1, linetype=2)+
+            labs(x = "False Positive Rate (1 - Specificity)",
+                 y = "True Positive Rate (Sensivity or Recall)")+
+            annotate("text",x = .75, y = .25,label=paste("AUC =", auc),
+                     size = 5, family="serif")+
+            coord_cartesian(xlim = c(0, 1), ylim = c(0, 1))+
+            theme_bw()+
+            theme(panel.background = element_rect(fill = 'transparent'),
+                  axis.ticks.length = unit(0.4, "lines"), 
+                  axis.ticks = element_line(color='black'),
+                  axis.line = element_line(size=.5, colour = "black"),
+                  axis.title = element_text(colour='black', size=12,face = "bold"),
+                  axis.text = element_text(colour='black',size=10,face = "bold"),
+                  text = element_text(size=8, color="black", family="serif"))
+  
+  # features
+  if(kind == "Phylum"){
+    dat_tax <- taxa %>% dplyr::select(one_of("Phylum")) %>%
+      mutate(features=Phylum)
+  }else if(kind == "all"){
+    dat_tax_sp <- taxa %>% dplyr::select(c("Phylum", "Species")) %>% 
+      unique() %>% setNames(c("Phylum", "features"))
+    dat_tax_gs <- taxa %>% dplyr::select(c("Phylum", "Genus")) %>% 
+      unique() %>% setNames(c("Phylum", "features"))
+    dat_tax_pm <- taxa %>% dplyr::select(one_of("Phylum")) %>%
+      unique() %>% mutate(features=Phylum)
+    dat_tax <- rbind(dat_tax_sp, dat_tax_gs, dat_tax_pm)
+  }else{
+    dat_tax <- taxa %>% dplyr::select(c("Phylum", kind)) %>%
+      unique() 
+    colnames(dat_tax)[which(colnames(dat_tax) == kind)] <- "features"    
+  }
+  imp <- varImp(model_rf, scale = TRUE)$importance %>% 
+          setNames("Importance") %>%
+          rownames_to_column("features") %>%
+          arrange(desc(Importance)) %>%
+          dplyr::slice(1:max(model_rf$bestTune)) %>%
+          inner_join(dat_tax, by = "features") %>%
+          mutate(Phylum=factor(Phylum))
+  
+  phly.fr <- levels(imp$Phylum)
+  phly.col <- tax.col[1:length(phly.fr)]
+  
+  imp$features <- factor(imp$features, levels = rev(as.character(imp$features)))
+  
+  plfeature <- ggplot(imp, aes(x=features, y=Importance, fill=Phylum)) + 
+    geom_bar(stat="identity", color="black")+
+    xlab("")+
+    coord_flip()+
+    scale_fill_manual(values = phly.col, labels = phly.fr)+
+    theme_classic()+
+    theme(panel.background = element_blank(),
+          panel.grid = element_blank(),
+          axis.line.x = element_line(size=.5, colour="black"),
+          axis.line.y = element_line(size=.5, colour="black"),
+          axis.ticks = element_line(color="black"),
+          axis.title = element_text(color="black", size=12, face="bold"),
+          axis.text.y = element_text(color="black", size=10, face="italic"),
+          legend.position = "right",
+          legend.background = element_blank(),
+          legend.key = element_blank(),
+          legend.text = element_text(size=8, face="italic"),
+          text = element_text(size=8, color="black", family="serif"))
+  
+  res <- list(plot_rfe=plrfe,        # selecting features before modeling
+              fit_model=model_rf,    # model fit 
+              plot_model=plmodel,    # the performance of parameters during tuning model 
+              plot_roc=plroc,        # the performance on test data 
+              plot_feature=plfeature,# the most important features plot 
+              score_features=imp
+              )
+  return(res)
+}
+```
+
+
+### Species
+```{r}
+species_rf <- reRf_fun2(profile = sp.prf, metadata = phen, taxa = taxonomy, kind = "Species")
+species_rf$plot_rfe
+species_rf$plot_model
+species_rf$plot_roc
+species_rf$plot_feature
+
+dir <- "../../Result/randomforest"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+species.rfe <- paste(dir, "species_rf_rfe_v3.pdf", sep = "/")
+ggsave(filename = species.rfe, plot = species_rf$plot_rfe, width = 7, height = 5, dpi = 600)
+
+species.model <- paste(dir, "species_rf_model_v3.pdf", sep = "/")
+ggsave(filename = species.model, plot = species_rf$plot_model, width = 7, height = 5, dpi = 600)
+
+species.roc <- paste(dir, "species_rf_roc_v3.pdf", sep = "/")
+ggsave(filename = species.roc, plot = species_rf$plot_roc, width = 7, height = 5, dpi = 600)
+
+species.feature <- paste(dir, "species_rf_feature_v3.pdf", sep = "/")
+ggsave(filename = species.feature, plot = species_rf$plot_feature, width = 7, height = 9, dpi = 600)
+
+save(species_rf, file = "../../Result/randomforest/species_rf_modelfit_v3.RData")
+
+write.csv(species_rf$score_features, "../../Result/randomforest/species_biomarker_rf_v3.csv", row.names = F)
+```
+
+
+### all tax
+```{r}
+all.prf <- rbind(sp.prf, gs.prf, pm.prf)
+
+all_rf <- reRf_fun2(profile = all.prf, metadata = phen, taxa = taxonomy, kind = "all")
+all_rf$plot_rfe
+all_rf$plot_model
+all_rf$plot_roc
+all_rf$plot_feature
+
+dir <- "../../Result/randomforest"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+all.rfe <- paste(dir, "all_Tax_rf_rfe_v3.pdf", sep = "/")
+ggsave(filename = all.rfe, plot = all_rf$plot_rfe, width = 7, height = 5, dpi = 600)
+
+all.model <- paste(dir, "all_Tax_rf_model_v3.pdf", sep = "/")
+ggsave(filename = all.model, plot = all_rf$plot_model, width = 7, height = 5, dpi = 600)
+
+all.roc <- paste(dir, "all_Tax_rf_roc_v3.pdf", sep = "/")
+ggsave(filename = all.roc, plot = all_rf$plot_roc, width = 7, height = 5, dpi = 600)
+
+all.feature <- paste(dir, "all_Tax_rf_feature_v3.pdf", sep = "/")
+ggsave(filename = all.feature, plot = all_rf$plot_feature, width = 7, height = 9, dpi = 600)
+
+save(all_rf, file = "../../Result/randomforest/all_Tax_rf_modelfit_v3.RData")
+
+write.csv(all_rf$score_features, "../../Result/randomforest/biomarker_rf_v3.csv", row.names = F)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [pre-processing data](http://topepo.github.io/caret/pre-processing.html#linear-dependencies)
+
+2. [Tune Machine Learning Algorithms in R](https://machinelearningmastery.com/tune-machine-learning-algorithms-in-r/)
+

@@ -1,0 +1,136 @@
+---
+title: "Hierarchical Clustering : hclust"
+date: "Created: 2021-01-14 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(vegan)
+library(ggdendro)
+library(ggplot2)
+
+grp <- c("lupus", "Control")
+grp.col <- c("#283891", "#C1272D")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+pm.prf <- fread("../../Result/profile/final_phylum_trim.tsv") 
+gs.prf <- fread("../../Result/profile/final_genus_trim.tsv")
+sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
+```
+
+
+### function
+```{r}
+hclust_fun <- function(profile=pm.prf,
+                      metadata=phen,
+                      grouping_column="Group"){
+  
+  # profile=pm.prf
+  # metadata=phen
+  # grouping_column="Group"
+  
+  
+  colnames(metadata)[which(colnames(metadata) == grouping_column)] <- "group_col"
+  prof <- profile %>% column_to_rownames("V1")%>% 
+    t() %>% data.frame() %>% 
+    rownames_to_column("SampleID") 
+  
+  # prof
+  sid <- intersect(metadata$SampleID, prof$SampleID)
+  phe <- metadata[metadata$SampleID%in%sid, ] %>% 
+    select(SampleID, group_col)
+  prf <- prof %>% filter(SampleID%in%sid) %>%
+    column_to_rownames("SampleID") %>%
+    as.matrix()
+  dis <- vegan::vegdist(scale(prf), method = "bray")
+
+  hc       <- hclust(dis, "ward.D2")             # heirarchal clustering
+  dendr    <- dendro_data(hc, type="rectangle")  # convert for ggplot
+  clust    <- cutree(hc, k=2)                    # find 2 clusters
+  clust.df <- data.frame(label=names(clust), cluster=factor(clust)) %>%
+    rownames_to_column("SampleID") %>%
+    inner_join(phe, by = "SampleID")
+  # dendr[["labels"]] has the labels, merge with clust.df based on label column
+  dendr[["labels"]] <- merge(dendr[["labels"]], clust.df, by="label")
+
+  pl <- ggplot()+ 
+    geom_segment(data=segment(dendr), aes(x=x, y=y, xend=xend, yend=yend))+ 
+    geom_text(data=label(dendr), 
+              aes(x, y, label=label, hjust=0, color=group_col), 
+              size=4)+
+    coord_flip()+ 
+    labs(y="")+
+    scale_y_reverse(expand=c(0.2, 0))+
+    scale_color_manual(values = grp.col)+
+    theme(axis.line = element_blank(),
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          axis.title = element_blank(),
+          panel.background = element_rect(fill="white"),
+          panel.grid = element_blank(),
+          legend.title=element_blank(),
+          legend.text=element_text(size=12,face = "bold",colour = "black",
+                                     margin = margin(r = 20)),
+          legend.key.width = unit(0.8,"cm"),
+          legend.key.height = unit(0.5,"cm"))
+  
+  return(pl)
+}
+```
+
+
+
+### phylum
+```{r, fig.height=8, fig.width=5}
+phylumpl <- hclust_fun(profile = pm.prf)
+phylumpl
+
+dir <- "../../Result/hclust"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+phylum.path <- paste(dir, "hclust_phylum.pdf", sep = "/")
+ggsave(filename = phylum.path, plot = phylumpl, width = 5, height = 8, dpi = 600)
+```
+
+### genus
+```{r, fig.height=8, fig.width=5}
+genuspl <- hclust_fun(profile = gs.prf)
+genuspl
+
+dir <- "../../Result/hclust"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+genus.path <- paste(dir, "hclust_genus.pdf", sep = "/")
+ggsave(filename = genus.path, plot = genuspl, width = 5, height = 8, dpi = 600)
+```
+
+
+### species
+```{r, fig.height=8, fig.width=5}
+speciespl <- hclust_fun(profile = sp.prf)
+speciespl
+
+dir <- "../../Result/hclust"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+species.path <- paste(dir, "hclust_species.pdf", sep = "/")
+ggsave(filename = species.path, plot = speciespl, width = 5, height = 8, dpi = 600)
+```
+
+### version
+```{r}
+sessionInfo()
+```

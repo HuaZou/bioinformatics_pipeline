@@ -1,0 +1,130 @@
+---
+title: "filter profile"
+date: "Created: 2021-01-11 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+sp.prof <- fread("../../Result/profile/final_species.tsv")
+gs.prof <- fread("../../Result/profile/final_genus.tsv")
+pm.prof <- fread("../../Result/profile/final_phylum.tsv")
+ko.prof <- fread("../../Result/profile/final_KO_relab.tsv")
+egg.prof <- fread("../../Result/profile/final_eggnog_relab.tsv")
+```
+
+### the criterions of filtering 
+
+* the taxa and pathway was removed if having zero value in more than 20 % of samples
+
+* the samples were removed if missing across more than 20% taxa or pathway
+
+```{r}
+
+get_profile <- function(profile    = sp.prof,
+                        metadata   = phen,
+                        occurrence = 0.2,
+                        present    = 0.2,
+                        kind = "clade_name"){
+  # profile    = sp.prof
+  # metadata   = phen
+  # occurrence = 0.2
+  # present    = 0.2
+  # kind = "clade_name"
+  
+  sid <- intersect(colnames(profile), phen$SampleID)
+  colnames(profile)[which(colnames(profile) == kind)] <- "Name"
+  dat <- profile %>% dplyr::select(c("Name", sid))
+  # feature occurrence
+  feature_occ <- apply(dat[, -1], 1, function(x){sum(x[!is.na(x)] != 0)/length(x)}) %>% 
+      data.frame() %>% 
+      setNames("feature_occurrence") %>%
+      mutate(Name = dat$Name)
+  remain_feature <- feature_occ %>% filter(feature_occurrence > occurrence)
+    
+  # sample occurrence 2020-01-13 remove this part
+  # sample_occ <- apply(dat[, -1], 2, function(x){sum(x[!is.na(x)] != 0)/length(x)}) %>% 
+  #     data.frame() %>% 
+  #     setNames("sample_occurrence") %>%
+  #     rownames_to_column("sample")
+  # remain_sample <- sample_occ %>% filter(sample_occurrence > present)
+    
+  # remove duplicate features
+  res <- dat %>% filter(Name%in%as.character(remain_feature$Name)) %>%
+      # dplyr::select(c("Name", as.character(remain_sample$sample))) %>%
+    column_to_rownames("Name")
+  
+  if(kind == "clade_name"){
+    res <- res/100
+  }
+  return(res)
+}
+
+sp.prof.trim <- get_profile(profile = sp.prof)
+gs.prof.trim <- get_profile(profile = gs.prof)
+pm.prof.trim <- get_profile(profile = pm.prof)
+
+ko.prof.trim <- get_profile(profile = ko.prof, kind = "# Gene Family")
+egg.prof.trim <- get_profile(profile = egg.prof, kind = "# Gene Family")
+```
+
+
+Result: 2020-01-13
+
+**After reanalysing the filtered profile, I found three taxonomic levels profile had different samples as well as the two functional profile. Two thresholds were used to trim raw profiles, one is feature, the other is samples. It meant that some samples's features were less than 20%. In order to further investigate the microbial biomarkers, I didn't remove these samples again because of the small sample size in this study. However, it was not suitable for data analysis.** 
+
+
+### get the common profile by the mutual samples
+```{r}
+sid <- intersect(colnames(sp.prof.trim),
+                 intersect(colnames(gs.prof.trim),
+                           intersect(colnames(pm.prof.trim),
+                                     intersect(colnames(ko.prof.trim), colnames(egg.prof.trim)))))
+print(sid)
+```
+
+
+### output
+```{r}
+dir_prf <- "../../Result/profile"
+if(!dir.exists(dir_prf)){
+  dir.create(dir_prf)
+}
+
+# species
+sp.path <- paste(dir_prf, "final_species_trim.tsv", sep = "/")
+write.table(sp.prof.trim, file = sp.path, quote = F, sep = "\t")
+
+# genus
+gs.path <- paste(dir_prf, "final_genus_trim.tsv", sep = "/")
+write.table(gs.prof.trim, file = gs.path, quote = F, sep = "\t")
+
+# phylum
+pm.path <- paste(dir_prf, "final_phylum_trim.tsv", sep = "/")
+write.table(pm.prof.trim, file = pm.path, quote = F, sep = "\t")
+
+# KO
+ko.path <- paste(dir_prf, "final_KO_relab_trim.tsv", sep = "/")
+write.table(ko.prof.trim, file = ko.path, quote = F, sep = "\t")
+
+# egg
+egg.path <- paste(dir_prf, "final_eggnog_relab_trim.tsv", sep = "/")
+write.table(egg.prof.trim, file = egg.path, quote = F, sep = "\t")
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

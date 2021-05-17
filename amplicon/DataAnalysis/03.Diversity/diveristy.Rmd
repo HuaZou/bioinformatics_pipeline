@@ -1,0 +1,209 @@
+---
+title: "diversity"
+date: "Created: 2021-01-12 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(vegan)
+library(ggpubr)
+library(ggplot2)
+
+grp <- c("lupus", "Control")
+grp.col <- c("#283891", "#C1272D")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
+gs.prf <- fread("../../Result/profile/final_genus_trim.tsv")
+pm.prf <- fread("../../Result/profile/final_phylum_trim.tsv")
+```
+
+
+### Alpha diversity
+```{r}
+# calculate diversity 
+get_alpha_diversity <- function(profile = sp.prf, 
+                                type="species"){
+  
+  # profile = sp.prf
+  # type="species"
+  
+  prf <- profile %>% column_to_rownames("V1")%>% 
+    t() %>% data.frame() %>% 
+    rownames_to_column("SampleID") 
+  
+  alpha <- plyr::ddply(prf, ~SampleID ,function(x){
+    data.frame(shannon=vegan::diversity(x[-1], index=c("shannon")),
+               simpson=vegan::diversity(x[-1], index=c("simpson")),
+               invsimpson=vegan::diversity(x[-1], index=c("invsimpson")))
+    }) %>% mutate(Taxonomy=type)
+  
+  return(alpha[, c(1, 5, 2:4)])
+}
+
+alpha.div <- rbind(
+      get_alpha_diversity(profile = sp.prf, type="species"), 
+      get_alpha_diversity(profile = gs.prf, type="genus"),
+      get_alpha_diversity(profile = pm.prf, type="phylum"))
+
+
+# visualization
+plot_alpha <- function(grouping_column="Group"){
+  
+  # grouping_column="Group"
+  
+  phe <- inner_join(phen, rbind(alpha.div %>% select(SampleID, Taxonomy, shannon) %>%
+                          tidyr::spread(Taxonomy, shannon)),
+                        by = "SampleID")
+  
+  colnames(phe)[which(colnames(phe) == grouping_column)] <- "group_col"
+  phe$group_col <- factor(as.character(phe$group_col), levels = grp)
+  
+  phenotype <- phe %>% select(SampleID, group_col)
+  plotdata <- phe %>% select(SampleID, phylum, genus, species)
+  
+  grp <- levels(phenotype$group_col)
+  
+  cmp <- NULL
+  for(i in 1:(length(grp) -1 )){
+    for(j in (i+1):length(grp)){
+      tmp <- c(grp[i], grp[j])
+      if(is.null(cmp)){
+        cmp[[1]] <- tmp
+      }else{
+        cmp[[i+1]] <- tmp
+      }
+    }
+  }
+  
+  #coloring function
+  # gg_color_hue <- function(n){
+  #   hues <- seq(15, 375, length=n+1)
+  #   hcl(h=hues,l=65, c=100)[1:n]
+  # }
+  # cols <- gg_color_hue(length(unique(phenotype$group_col)))
+  
+  pl <- inner_join(phenotype, plotdata, by="SampleID") %>%
+      tidyr::gather(group, value, -c("SampleID", "group_col")) %>%
+      mutate(group_col=factor(group_col, levels = grp),
+             group=factor(group, levels = c("phylum", "genus", "species"))) %>%
+      ggplot(aes(x=group_col, y=value, fill=group_col))+
+        stat_boxplot(geom = "errorbar", width = .12)+
+        geom_boxplot(width = .3, outlier.shape = 3, outlier.size = 1)+
+        guides(fill=guide_legend(NULL, keywidth = .5, keyheight = .5))+
+        facet_wrap(facets = "group", scales = "free")+
+        stat_compare_means(comparisons = cmp,
+                           method = "wilcox.test",
+                           label = "p.label")+
+        xlab("")+
+        ylab("Shannon Index")+
+        guides(fill = F)+
+        theme_bw()+
+        scale_fill_manual(values = grp.col,
+                          labels = grp)+
+        theme(axis.title = element_text(size = 10, color = "black", face = "bold"),
+              axis.text = element_text(size = 9, color = "black"),
+              text = element_text(size = 8, color = "black", family="serif"),
+              strip.text = element_text(size = 9, color = "black", face = "bold"),
+              panel.grid = element_blank())
+  return(pl)
+}
+
+alphapl <- plot_alpha(grouping_column="Group")
+alphapl
+
+# output
+dir <- "../../Result/diversity"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+alpha.path <- paste(dir, "alpha_diversity.pdf", sep = "/")
+ggsave(filename = alpha.path, plot = alphapl, width = 5, height = 4, dpi = 600)
+```
+
+
+### beta diversity
+```{r}
+centorComp <- function(profile = sp.prf, 
+                       method = "bray"){
+  
+  # profile = sp.prf 
+  # method = "bray"
+  
+  prf <- profile %>% column_to_rownames("V1")%>% 
+    t() %>% data.frame() 
+  
+  id <- intersect(rownames(prf), phen$SampleID)
+  prf.cln <- prf %>% rownames_to_column("SampleID") %>%
+    filter(SampleID%in%id) %>%
+    column_to_rownames("SampleID")
+  phe <- phen %>% filter(SampleID%in%id) %>%
+    mutate(Group=factor(Group, levels = grp))
+  fr <- phe$Group
+  
+  # compute the distance
+  prodis <- vegan::vegdist(prf.cln, method = method)
+  mod <- vegan::betadisper(prodis, fr)
+
+  qdata <- data.frame(dis = mod$distance, label = fr)
+
+  cmp <- list()
+  num <- combn(length(unique(fr)), 2)
+  for(i in 1:ncol(num)){
+    cmp[[i]] <- num[, i]
+  }
+
+  pl <- ggplot(qdata, aes(x=label, y=dis, fill=label))+
+          stat_boxplot(geom = "errorbar", width = .12)+
+          geom_boxplot(width = .3, outlier.shape = 3, outlier.size = 1)+
+          guides(fill=guide_legend(NULL, keywidth = .5, keyheight = .5))+
+          stat_compare_means(comparisons = cmp,
+                             method = "wilcox.test",
+                             label = "p.label")+
+          scale_fill_manual(values=grp.col,
+                            labels=grp)+
+          guides(fill=F)+
+          labs(x="", y="Distance to centroid")+
+          theme_bw()+
+          theme(axis.title = element_text(size = 10, color = "black", face = "bold"),
+                axis.text = element_text(size = 9, color = "black"),
+                text = element_text(size = 8, color = "black", family="serif"),
+                strip.text = element_text(size = 9, color = "black", face = "bold"),
+                panel.grid = element_blank())
+
+  return(pl)
+
+}
+
+pm.beta <- centorComp(profile = pm.prf)
+gs.beta <- centorComp(profile = gs.prf)
+sp.beta <- centorComp(profile = sp.prf)
+
+betapl <- cowplot::plot_grid(pm.beta, gs.beta, sp.beta, ncol=3)
+betapl
+
+# output
+dir <- "../../Result/diversity"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+beta.path <- paste(dir, "beta_diversity.pdf", sep = "/")
+ggsave(filename = beta.path, plot = betapl, width = 5, height = 4, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+

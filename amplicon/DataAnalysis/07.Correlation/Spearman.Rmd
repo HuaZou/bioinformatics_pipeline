@@ -1,0 +1,166 @@
+---
+title: "Association between taxonomy and biocheimal: Spearman"
+date: "Created: 2021-01-12 Modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+
+grp <- c("lupus", "Control")
+grp.col <- c("#283891", "#C1272D")
+```
+
+
+### load data
+```{r}
+phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
+sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
+sp.marker.rf <- read.csv("../../Result/randomforest/species_biomarker_rf_v3.csv")
+
+# gs.prf <- fread("../../Result/profile/final_genus_trim.tsv")
+# pm.prf <- fread("../../Result/profile/final_phylum_trim.tsv")
+
+taxonomy <- fread("../../Result/profile/taxonomy_levels.tsv")
+```
+
+
+### Spearman correlation coefficient
+
+```{r}
+Permanova_fun <- function(profile  = sp.prf, 
+                          metadata = phen,
+                          marker   = sp.marker.rf,
+                          taxa     = taxonomy,
+                          kind     = "Species"){
+
+  # profile  = sp.prf
+  # metadata = phen
+  # marker   = sp.marker.rf
+  # taxa     = taxonomy 
+  # kind     = "Species"
+
+  sid <- intersect(metadata$SampleID, colnames(profile))
+  phe <- metadata %>% filter(SampleID%in%sid)
+  prof <- profile %>% filter(V1%in%marker$features) %>% 
+    column_to_rownames("V1") %>% 
+    dplyr::select(sid) %>%
+    rownames_to_column("Tax") %>%
+    inner_join(taxa %>% dplyr::select(c("Phylum", kind)), 
+               by =c("Tax"=kind)) %>%
+    dplyr::select(Phylum, Tax, everything())
+  
+  mdat <- prof %>% dplyr::select(-Phylum) %>%
+    column_to_rownames("Tax") %>% 
+    t() %>% data.frame() %>%
+    rownames_to_column("SampleID") %>% 
+    inner_join(phe, by = "SampleID") %>%
+    column_to_rownames("SampleID")
+  
+  res <- Hmisc::rcorr(as.matrix(mdat), type = "spearman")
+  
+  
+  if(adjust){
+    per <- apply(phe %>% select(-one_of("SampleID", "Sex", "Age")), 2, function(x, prof){
+        dat <- data.frame(value = x, Sex=phe$Sex, Age=phe$Age, prof) %>% na.omit()
+        df <- dat %>% dplyr::select(-c("Age", "Sex"))
+        datphe <- df$value 
+        if (length(datphe) == 0 | length(unique(datphe)) == 1) {
+          res <- c(length(datphe), rep(NA, 6))
+        }else{
+          if (length(unique(datphe)) < 6) {
+            datphe <- as.factor(datphe)
+          } 
+            datprf <- df[, -1, F] 
+            dis <- vegan::vegdist(datprf, method = "bray")
+            set.seed(123)
+            dat.tmp <- data.frame(group_col=datphe, Sex=dat$Sex, Age=dat$Age)
+            ad <- vegan::adonis(dis ~ group_col+Sex+Age, data = dat.tmp, permutations = 1000)
+            tmp <- as.data.frame(ad$aov.tab) %>% slice(1)
+            res <- c(length(datphe), as.numeric(tmp[, c(1:6)]))
+          }
+        return(res)
+      }, prof) %>% t() %>% data.frame()    
+  }else{
+    per <- apply(phe %>% select(-one_of("SampleID")), 2, function(x, prof){
+        dat <- data.frame(value = x, prof) %>% na.omit()
+        datphe <- dat$value  
+        if (length(datphe) == 0 | length(unique(datphe)) == 1) {
+          res <- c(length(datphe), rep(NA, 6))
+        }else{
+          if (length(unique(datphe)) < 6) {
+            datphe <- as.factor(datphe)
+          } 
+            datprf <- dat[, -1, F] 
+            dis <- vegan::vegdist(datprf, method = "bray")
+            set.seed(123)
+            ad <- vegan::adonis(dis ~ datphe, permutations = 1000)
+            tmp <- as.data.frame(ad$aov.tab) %>% slice(1)
+            res <- c(length(datphe), as.numeric(tmp[, c(1:6)]))
+          }
+        return(res)
+      }, prof) %>% t() %>% data.frame()    
+  }
+
+    
+  colnames(per) <- c("SumsOfSample", "Df", "SumsOfSqs", 
+                       "MeanSqs", "F.Model", "R2", "Pr(>F)")
+  per$FDR <- p.adjust(per$`Pr(>F)`, method = "BH")
+  return(per)
+}
+```
+
+
+### species
+```{r}
+dir <- "../../Result/permanova"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+
+sp.per <- Permanova_fun(profile = sp.prf)
+DT::datatable(sp.per)
+sp.path <- paste(dir, "species_permanova.csv", sep = "/")
+write.csv(sp.per, file = sp.path, row.names = T)
+```
+
+
+### genus
+```{r}
+dir <- "../../Result/permanova"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+
+gs.per <- Permanova_fun(profile = gs.prf)
+DT::datatable(gs.per)
+gs.path <- paste(dir, "genus_permanova.csv", sep = "/")
+write.csv(gs.per, file = gs.path, row.names = T)
+```
+
+
+### phylum
+```{r}
+dir <- "../../Result/permanova"
+if(!dir.exists(dir)){
+  dir.create(dir)
+}
+
+pm.per <- Permanova_fun(profile = pm.prf)
+DT::datatable(pm.per)
+pm.path <- paste(dir, "phylum_permanova.csv", sep = "/")
+write.csv(pm.per, file = pm.path, row.names = T)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+
