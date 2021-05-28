@@ -1,0 +1,96 @@
+---
+title: "Occurrence"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## get the mean relative abundance and occurrence in OTU and genus levels 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+```
+
+
+### load data
+```{r}
+SD01 <- fread("../dataset/profile/SD01_rarefy10000_v2.tsv")
+SD02 <- fread("../dataset/profile/SD02_rarefy10000_v2.tsv")
+SD04 <- fread("../dataset/profile/SD04_rarefy10000_v2.tsv")
+sxtr <- fread("../dataset/profile/sxtr_rarefy10000_v2.tsv")
+
+SD01_tax <- read.csv("../dataset/taxonomy/SD01_taxonomy.csv")
+SD02_tax <- read.csv("../dataset/taxonomy/SD02_taxonomy.csv")
+SD04_tax <- read.csv("../dataset/taxonomy/SD04_taxonomy.csv")
+sxtr_tax <- read.csv("../dataset/taxonomy/sxtr_taxonomy.csv")
+```
+
+
+### Curation
+```{r}
+get_mean_occ <- function(prof=SD01,
+                         tax=SD01_tax,
+                         tag="SD01"){
+
+  # prof=SD01
+  # tag="SD01"
+  # tax=SD01_tax
+  
+  mdat <- cbind(prof[, 1, drop=F], 
+               prof[, -1] %>% summarise(across(everything(), 
+                                               function(x){x/sum(x)}))) %>%
+          inner_join(tax, dat, by="OTUID")
+  
+  mdat_otu <- mdat %>% dplyr::select(-Genus)
+  mdat_genus <- mdat %>% dplyr::select(-OTUID) %>% 
+    group_by(Genus) %>%
+    summarise(across(everything(), mean)) %>%
+    ungroup()
+  
+  mdat_otu_occ <- cbind(mdat_otu$OTUID, apply(mdat_otu %>% dplyr::select(-OTUID), 1, function(x){
+          mn <- mean(x)
+          occ <- length(x[x>0])
+          return(c(mn, occ))
+  }) %>% t() %>% data.frame()) %>%
+    setNames(c("OTUID", "Relative Abundance(Mean)", "Occurrence"))
+  
+  mdat_genus_occ <- cbind(mdat_genus$Genus, apply(mdat_genus %>% dplyr::select(-Genus), 1, function(x){
+          mn <- mean(x)
+          occ <- length(x[x>0])
+          return(c(mn, occ))
+  }) %>% t() %>% data.frame()) %>%
+    setNames(c("Genus", "Relative Abundance(Mean)", "Occurrence"))  
+  
+  dir.out <- "../dataset/Occurrence/"
+  if(!dir.exists(dir.out)){
+    dir.create(dir.out)
+  }
+  
+  filename_otu <- paste0(dir.out, tag, "_occurrence_OTU", ".tsv")
+  write.table(mdat_otu_occ, file = filename_otu, quote = F, sep = "\t", row.names = F)
+
+  filename_genus <- paste0(dir.out, tag, "_occurrence_Genus", ".tsv")
+  write.table(mdat_genus_occ, file = filename_genus, quote = F, sep = "\t", row.names = F)  
+}
+```
+
+
+### run  
+```{r}
+get_mean_occ(prof=SD01, tax=SD01_tax, tag="SD01")
+get_mean_occ(prof=SD02, tax=SD02_tax, tag="SD02")
+get_mean_occ(prof=SD04, tax=SD04_tax, tag="SD04")
+get_mean_occ(prof=sxtr, tax=sxtr_tax, tag="sxtr")
+```
+
+
+### R information
+```{r}
+sessionInfo()
+```
+

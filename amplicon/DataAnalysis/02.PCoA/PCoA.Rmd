@@ -1,0 +1,107 @@
+---
+title: "PCoA"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(vegan)
+library(ape)
+library(ggrepel)
+```
+
+
+### load data
+```{r}
+SD01 <- read.table("../dataset/SD01_rarefy10000.tsv", header = T)
+SD02 <- read.table("../dataset/SD02_rarefy10000.tsv", header = T)
+SD04 <- read.table("../dataset/SD04_rarefy10000.tsv", header = T)
+sxtr <- read.table("../dataset/sxtr_rarefy10000.tsv", header = T)
+```
+
+
+### plot function
+```{r}
+pcoa_plot <- function(prof=SD01, type="SD01"){
+  
+  # prof=SD01
+  # type="SD01"
+  
+  prf <- prof %>% column_to_rownames("OTUID") %>%
+    summarise(across(everything(), function(x){x/sum(x)}))
+  dis <- as.dist(vegdist(t(prf), method = "bray"))
+  
+  pcoa <- pcoa(dis)
+  eig <- pcoa$values[, "Eigenvalues"]
+  eig_var <- eig[1:2]
+  eig_var_explain <- round(eig_var/sum(eig), 4) * 100 
+  explains <- paste0(paste0("PCoA", seq(2)), " (", paste0(eig_var_explain, "%"), ")")
+  # principal coordinate decomposition score of each sample
+  score <- data.frame(pcoa$vectors[, c(1:2)]) %>% 
+    setNames(c("PCoA1", "PCoA2")) %>%
+    rownames_to_column("Sample") 
+  filename <- paste0(type, "_PCoA_score.csv")
+  write.csv(score, file = filename, row.names = F)
+	
+  pl <- ggplot(score, aes(x=PCoA1, y=PCoA2, color=Sample))+
+        geom_point(#aes(shape=SampleID), 
+                   alpha=1, 
+                   size=3)+
+        geom_text_repel(aes(x=PCoA1, y=PCoA2, label=as.character(Sample)))+
+        labs(x=explains[1],
+             y=explains[2])+
+        #scale_shape_manual(values = c(1:nrow(x)))+
+        theme_bw()+
+        theme(axis.title = element_text(size=10, color="black", face="bold"),
+          axis.text = element_text(size=9, color="black"),
+          text = element_text(size=8, color="black", family="serif"),
+          strip.text = element_text(size=9, color="black", face="bold"), 
+          panel.grid = element_blank(),
+          legend.text=element_text(size=10, color = "black"),
+          legend.background = element_rect(color = "black", fill="white"))
+  return(pl)
+}
+```
+
+
+### plot
+
+* SD01
+```{r}
+SD01_pl <- pcoa_plot(prof = SD01, type="SD01")
+SD01_pl
+ggsave("../figure/SD01_PCoA_OTU.pdf", SD01_pl, width = 7, height = 4, dpi = 600)
+```
+
+* SD02
+```{r}
+SD02_pl <- pcoa_plot(prof = SD02, type="SD02")
+SD02_pl
+ggsave("../figure/SD02_PCoA_OTU.pdf", SD02_pl, width = 7, height = 4, dpi = 600)
+```
+
+* SD04
+```{r}
+SD04_pl <- pcoa_plot(prof = SD04, type="SD04")
+SD04_pl
+ggsave("../figure/SD04_PCoA_OTU.pdf", SD04_pl, width = 7, height = 4, dpi = 600)
+```
+
+* sxtr
+```{r}
+sxtr_pl <- pcoa_plot(prof = sxtr, type="sxtr")
+sxtr_pl
+ggsave("../figure/sxtr_PCoA_OTU.pdf", sxtr_pl, width = 7, height = 4, dpi = 600)
+```
+
+
+### R information
+```{r}
+sessionInfo()
+```
+

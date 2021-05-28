@@ -1,0 +1,221 @@
+---
+title: "sankey"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(ggalluvial)
+```
+
+
+### load data
+```{r}
+SD01 <- read.csv("../dataset/profile/SD01_taxonomy_L7_relative.csv")
+SD02 <- read.csv("../dataset/profile/SD02_taxonomy_L7_relative.csv")
+SD04 <- read.csv("../dataset/profile/SD04_taxonomy_L7_relative.csv")
+sxtr <- read.csv("../dataset/profile/sxtr_taxonomy_L7_relative.csv")
+```
+
+
+### color 
+```{r}
+if(0){
+  # before 
+  color_genus <- c('#BEAED4', '#FDC086', '#FFFF99', '#386CB0', '#F0027F')
+  color_species <- c('#6181BD', '#F34800', '#64A10E', '#FF00FF', '#c7475b',
+                     '#049a0b', '#FF7F00', '#FFFF33', '#A65628', '#F781BF')
+  
+  color_sample <- c('#8DD3C7', '#FFFFB3', '#BEBADA', '#FB8072', '#80B1D3',
+                    '#FDB462','#B3DE69', '#FCCDE5', '#BC80BD', '#CCEBC5', 
+                    '#FFED6F', '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3')  
+}
+
+# 
+
+color_genus <- c("#0000FF", "#006400", "#FFFF00", "#FF4500", "#00BFFF", "#C0C0C0")
+genus_id <- c("Candidatus_Scalindua", "Candidatus_Brocadia", "Candidatus_Kuenenia",
+              "Candidatus_Jettenia", "Candidatus_Anammoxoglobus", "Unclassified")
+color_sample <- c('#8DD3C7', '#FFFFB3', '#BEBADA', '#FB8072', '#80B1D3',
+                    '#FDB462','#B3DE69', '#FCCDE5', '#BC80BD', '#CCEBC5', 
+                    '#FFED6F', '#E41A1C', '#377EB8', '#4DAF4A', '#984EA3')
+```
+
+
+### plot function
+```{r}
+sankey_plot <- function(prof=SD01, kind="S"){
+  
+  # prof=SD01
+  # kind="S"
+  
+  if(kind == "S"){
+    dat <- prof %>% select(c("Genus", "Species", starts_with("SD")))     
+  }else{
+     dat <- prof %>% select(c("Genus", "Species", starts_with("sxtr"))) 
+  }
+  
+  mdat <- dat %>% group_by(Genus, Species) %>%
+    summarise(across(everything(), sum)) %>%
+    ungroup() %>% 
+    tidyr::gather(key="Sample", value = "Abundance", -c("Genus", "Species")) %>%
+    mutate(Genus=gsub("g__", "", Genus),
+           Species=gsub("s__", "", Species)) 
+  
+  pldata <- mdat %>% tidyr::gather(key="Group", value = "Type", -Abundance) %>%
+    mutate(Group=factor(Group, levels = c("Genus", "Species", "Sample")))
+  type <- summary(pldata$Group)
+  pldata$Flow <- rep(1:type[1], length(type))
+  
+  pl <- ggplot(pldata, aes(x = Group, y = Abundance,
+    stratum = Type, alluvium = Flow, fill = Type)) +
+    geom_stratum() +  
+    geom_text(stat = 'stratum', infer.label = TRUE, size = 4, family="serif") +  
+    geom_flow() +  
+    scale_fill_manual(values = c(color_genus, color_species, color_sample)) + 
+    scale_x_discrete(limits = c("Genus", "Species", "Sample")) +  
+    scale_y_continuous(expand = c(0, 0)) +
+    guides(fill=F) +
+    labs(x = '', y = 'Abundance') +  
+    theme(legend.position = 'none', 
+        axis.line = element_line(),
+        panel.background = element_blank(),
+        axis.title.y = element_text(face = 'bold',color = 'black',size = 14),
+        axis.title.x = element_text(face = 'bold',color = 'black',size = 14),
+        axis.text.y = element_text(face = 'bold',color = 'black',size = 10),
+        axis.text.x = element_text(face = 'bold',color = 'black',size = 12),
+        text=element_text(family="serif"))
+  return(pl)
+}
+
+sankey_plot_v2 <- function(prof=SD01, kind="S"){
+  
+  # prof=SD04
+  # kind="S"
+  
+  if(kind == "S"){
+    dat <- prof %>% select(c("Genus", "Species", starts_with("SD")))     
+  }else{
+     dat <- prof %>% select(c("Genus", "Species", starts_with("sxtr"))) 
+  }
+  
+  mdat <- dat %>% group_by(Genus, Species) %>%
+    summarise(across(everything(), sum)) %>%
+    ungroup() %>% 
+    tidyr::gather(key="Sample", value = "Abundance", -c("Genus", "Species")) %>%
+    mutate(Genus=gsub("g__", "", Genus),
+           Species=gsub("s__", "", Species)) 
+  
+  # match color for genus and species
+  match_color <- function(genus_level){
+      genus_idx <- pmatch(genus_level, genus_id)
+      col <- color_genus[genus_idx]
+      genus_name <- genus_id[genus_idx]
+      res <- data.frame(genus=genus_name, color=col)
+      return(res)
+  }   
+  ann_colors <- match_color(unique(as.character(mdat$Genus))) 
+  mdat_new <- mdat %>% mutate(Genus=factor(Genus, levels = ann_colors$genus))
+  
+  tax_table <- mdat_new %>% dplyr::select(c("Genus","Species")) %>% unique() 
+  gs_fr <- levels(tax_table$Genus)
+  tax_table$color <- NA
+  for(i in 1:length(gs_fr)){
+    idx <- grep(gs_fr[i], as.character(tax_table$Genus))
+    idx_col <- with(ann_colors, ann_colors[genus%in%gs_fr[i], ])$color
+    tax_table$color[idx] <- colorRampPalette(c(idx_col, "white"))(50)[seq(10, 40, 5)]
+  }
+  tax_table$color <- ifelse(tax_table$Species == "Unclassified", color_genus[6], tax_table$color)
+  tax_table_cln <- tax_table %>% dplyr::select(c("Species", "color")) %>% unique() %>%
+    setNames(c("Kind", "color"))
+  sample_color <- mdat_new %>% dplyr::select(Sample) %>% unique() %>%
+    mutate(color=color_sample[1:length(unique(mdat_new$Sample))]) %>%
+    setNames(c("Kind", "color"))
+  all_color <- rbind(ann_colors %>% setNames(c("Kind", "color")),
+                     tax_table_cln, sample_color) %>% unique() 
+  
+  #colorRampPalette(c(genus_color[1], "white"))(100)
+  
+  pldata <- mdat_new %>% tidyr::gather(key="Group", value = "Type", -Abundance) %>%
+    mutate(Group=factor(Group, levels = c("Genus", "Species", "Sample"))) %>%
+    mutate(Type=factor(as.character(Type), levels = c(all_color$Kind)))
+  type <- summary(pldata$Group)
+  pldata$Flow <- rep(1:type[1], length(type))
+  
+  pl <- ggplot(pldata, aes(x = Group, y = Abundance,
+    stratum = Type, alluvium = Flow, fill = Type)) +
+    geom_stratum() +  
+    geom_text(stat = 'stratum', infer.label = TRUE, size = 4, family="serif") +  
+    geom_flow() +  
+    scale_fill_manual(values = c(all_color$color),
+                      label = c(all_color$Kind)) + 
+    scale_x_discrete(limits = c("Genus", "Species", "Sample")) +  
+    scale_y_continuous(expand = c(0, 0)) +
+    guides(fill=F) +
+    labs(x = '', y = 'Abundance') +  
+    theme(legend.position = 'none', 
+        axis.line = element_line(),
+        panel.background = element_blank(),
+        axis.title.y = element_text(face = 'bold',color = 'black',size = 14),
+        axis.title.x = element_text(face = 'bold',color = 'black',size = 14),
+        axis.text.y = element_text(face = 'bold',color = 'black',size = 10),
+        axis.text.x = element_text(face = 'bold',color = 'black',size = 12),
+        text=element_text(family="serif"))
+  return(pl)
+}
+```
+
+
+### plot
+```{r}
+# SD01
+SD01_sankey_pl <- sankey_plot(prof = SD01)
+SD01_sankey_pl
+ggsave("../figure/01.sankey/SD01_sankey.pdf", SD01_sankey_pl, width = 12, height = 12, dpi = 600)
+
+# SD02
+SD02_sankey_pl <- sankey_plot(prof = SD02)
+SD02_sankey_pl
+ggsave("../figure/01.sankey/SD02_sankey.pdf", SD02_sankey_pl, width = 12, height = 12, dpi = 600)
+
+# SD04
+SD04_sankey_pl <- sankey_plot(prof = SD04)
+SD04_sankey_pl
+ggsave("../figure/01.sankey/SD04_sankey.pdf", SD04_sankey_pl, width = 12, height = 12, dpi = 600)
+
+# sxtr
+sxtr_sankey_pl <- sankey_plot(prof = sxtr, kind = "s")
+sxtr_sankey_pl
+ggsave("../figure/01.sankey/sxtr_sankey.pdf", sxtr_sankey_pl, width = 12, height = 12, dpi = 600)
+```
+
+
+### plot
+```{r}
+# SD01
+SD01_sankey_pl <- sankey_plot_v2(prof = SD01)
+ggsave("../figure/01.sankey/SD01_sankey_v2.pdf", SD01_sankey_pl, width = 12, height = 12, dpi = 600)
+
+# SD02
+SD02_sankey_pl <- sankey_plot_v2(prof = SD02)
+ggsave("../figure/01.sankey/SD02_sankey_v2.pdf", SD02_sankey_pl, width = 12, height = 12, dpi = 600)
+
+# SD04
+SD04_sankey_pl <- sankey_plot_v2(prof = SD04)
+ggsave("../figure/01.sankey/SD04_sankey_v2.pdf", SD04_sankey_pl, width = 12, height = 12, dpi = 600)
+
+# sxtr
+sxtr_sankey_pl <- sankey_plot_v2(prof = sxtr, kind = "s")
+ggsave("../figure/01.sankey/sxtr_sankey_v2.pdf", sxtr_sankey_pl, width = 12, height = 12, dpi = 600)
+```
+
+### R information
+```{r}
+sessionInfo()
+```
+

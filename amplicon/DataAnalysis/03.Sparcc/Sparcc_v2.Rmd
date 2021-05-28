@@ -1,0 +1,366 @@
+---
+title: "SparCC"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(igraph)
+library(psych)
+```
+
+
+### load data 
+```{r}
+SD01 <- read.table("../dataset/Sparcc/SD01_rarefy10000_v2.tsv", header = T)
+SD02 <- read.table("../dataset/Sparcc/SD02_rarefy10000_v2.tsv", header = T)
+SD04 <- read.table("../dataset/Sparcc/SD04_rarefy10000_v2.tsv", header = T)
+sxtr <- read.table("../dataset/Sparcc/sxtr_rarefy10000_v2.tsv", header = T)
+```
+
+
+### filter data (relative abundance)
+
+* 0.5%
+
+* 0.1%
+
+```{r}
+filter_fun <- function(prof=SD01, 
+                       tag="SD01", 
+                       cutoff=0.005){
+
+  # prof=SD01
+  # tag="SD01" 
+  # cutoff=0.005
+  
+  dat <- cbind(prof[, 1, drop=F], 
+               prof[, -1] %>% summarise(across(everything(), 
+                                               function(x){x/sum(x)}))) %>%
+    column_to_rownames("OTUID")
+  
+  #dat.cln <- dat[rowSums(dat) > cutoff, ]
+  
+  remain <- apply(dat, 1, function(x){
+    length(x[x>cutoff])
+  }) %>% data.frame() %>%
+    setNames("Counts") %>%
+    rownames_to_column("OTUID") %>%
+    mutate(State=ifelse(Counts>1, "Remain", "Discard")) %>%
+    filter(State == "Remain")
+  
+  # count
+  count <- prof %>% filter(OTUID%in%remain$OTUID)
+  filename <- paste0("../dataset/Sparcc/", tag, "_rarefy10000_v2_", cutoff, ".tsv")
+  write.table(count, file = filename, quote = F, sep = "\t", row.names = F)
+  
+  # relative abundance
+  relative <- dat %>% rownames_to_column("OTUID") %>%
+    filter(OTUID%in%remain$OTUID)
+  filename <- paste0("../dataset/Sparcc/", tag, "_rarefy10000_v2_", cutoff, "_rb.tsv")
+  write.table(relative, file = filename, quote = F, sep = "\t", row.names = F)
+}
+```
+
+
+### run filtering 
+```{r}
+filter_fun(prof=SD01, tag="SD01", cutoff=0.005)
+filter_fun(prof=SD01, tag="SD01", cutoff=0.001)
+
+filter_fun(prof=SD02, tag="SD02", cutoff=0.005)
+filter_fun(prof=SD02, tag="SD02", cutoff=0.001)
+
+filter_fun(prof=SD04, tag="SD04", cutoff=0.005)
+filter_fun(prof=SD04, tag="SD04", cutoff=0.001)
+
+filter_fun(prof=sxtr, tag="sxtr", cutoff=0.005)
+filter_fun(prof=sxtr, tag="sxtr", cutoff=0.001)
+```
+
+
+
+### SparCC analysis
+
+* get Sparcc Correlation and pvalue (1000 permutation)
+```{bash}
+# http://psbweb05.psb.ugent.be/conet/microbialnetworks/sparcc.php
+git clone git@github.com:JCSzamosi/SparCC3.git
+export PATH=/path/SparCC3:$PATH
+
+# Step 1 - Compute correlations
+python /data/share/toolkits/SparCC3/SparCC.py sxtr_rarefy10000_v2_0.001.tsv -i 20 --cor_file=sxtr_sparcc.tsv > sxtr_sparcc.log
+echo "Step 1 - Compute correlations Ended successfully!"
+
+# Step 2 - Compute bootstraps
+python /data/share/toolkits/SparCC3/MakeBootstraps.py sxtr_rarefy10000_v2_0.001.tsv -n 1000 -t bootstrap_#.txt -p pvals/ >> sxtr_sparcc.log
+echo "Step 2 - Compute bootstraps Ended successfully!"
+
+# Step 3 - Compute p-values
+for n in {0..999}; do /data/share/toolkits/SparCC3/SparCC.py pvals/bootstrap_${n}.txt -i 20 --cor_file=pvals/bootstrap_cor_${n}.txt >> sxtr_sparcc.log; done
+python /data/share/toolkits/SparCC3/PseudoPvals.py sxtr_sparcc.tsv pvals/bootstrap_cor_#.txt 1000 -o pvals/pvals.two_sided.txt -t two_sided >> sxtr_sparcc.log
+echo "Step 3 - Compute p-values Ended successfully!"
+
+# step 4 - Rename file
+mv pvals/pvals.two_sided.txt sxtr_pvals.two_sided.tsv
+mv cov_mat_SparCC.out sxtr_cov_mat_SparCC.tsv
+echo "step 4 - Rename file Ended successfully!"
+```
+
+
+
+### Network: requirements
+
+1. 保留相互之间显著差异(p < 0.05)OTU;
+
+2. genus分类学水平表示OTU来源；
+
+3. OTU间相关性用颜色区分，且线条粗细代表相关系数大小；
+
+4. OTU点大小表示其丰度大小；
+
+5. 统计网络中正负相关数目；
+
+
+#### load data 
+```{r}
+SD01_cor <- read.table("../dataset/Sparcc/cutoff_5/SD01/SD01_cov_mat_SparCC.tsv", header = T, row.names = 1)
+SD01_pval <- read.table("../dataset/Sparcc/cutoff_5/SD01/SD01_pvals.two_sided.tsv", header = T, row.names = 1)
+SD01_rb5 <- read.table("../dataset/Sparcc/SD01_rarefy10000_v2_0.005_rb.tsv", header = T, row.names = 1)
+SD01_tax <- read.csv("../dataset/taxonomy/SD01_taxonomy.csv")
+
+
+SD02_cor <- read.table("../dataset/Sparcc/cutoff_5/SD02/SD02_cov_mat_SparCC.tsv", header = T, row.names = 1)
+SD02_pval <- read.table("../dataset/Sparcc/cutoff_5/SD02/SD02_pvals.two_sided.tsv", header = T, row.names = 1)
+SD02_rb5 <- read.table("../dataset/Sparcc/SD02_rarefy10000_v2_0.005_rb.tsv", header = T, row.names = 1)
+SD02_tax <- read.csv("../dataset/taxonomy/SD02_taxonomy.csv")
+
+
+SD04_cor <- read.table("../dataset/Sparcc/cutoff_5/SD04/SD04_cov_mat_SparCC.tsv", header = T, row.names = 1)
+SD04_pval <- read.table("../dataset/Sparcc/cutoff_5/SD04/SD04_pvals.two_sided.tsv", header = T, row.names = 1)
+SD04_rb5 <- read.table("../dataset/Sparcc/SD04_rarefy10000_v2_0.005_rb.tsv", header = T, row.names = 1)
+SD04_tax <- read.csv("../dataset/taxonomy/SD04_taxonomy.csv")
+
+
+sxtr_cor <- read.table("../dataset/Sparcc/cutoff_5/sxtr/sxtr_cov_mat_SparCC.tsv", header = T, row.names = 1)
+sxtr_pval <- read.table("../dataset/Sparcc/cutoff_5/sxtr/sxtr_pvals.two_sided.tsv", header = T, row.names = 1)
+sxtr_rb5 <- read.table("../dataset/Sparcc/sxtr_rarefy10000_v2_0.005_rb.tsv", header = T, row.names = 1)
+sxtr_tax <- read.csv("../dataset/taxonomy/sxtr_taxonomy.csv")
+```
+
+
+```{r}
+SD01_cor_1 <- read.table("../dataset/Sparcc/cutoff_1/SD01/SD01_cov_mat_SparCC.tsv", header = T, row.names = 1)
+SD01_pval_1 <- read.table("../dataset/Sparcc/cutoff_1/SD01/SD01_pvals.two_sided.tsv", header = T, row.names = 1)
+SD01_rb_1 <- read.table("../dataset/Sparcc/SD01_rarefy10000_v2_0.001_rb.tsv", header = T, row.names = 1)
+SD01_tax_1 <- read.csv("../dataset/taxonomy/SD01_taxonomy.csv")
+
+
+SD02_cor_1 <- read.table("../dataset/Sparcc/cutoff_1/SD02/SD02_cov_mat_SparCC.tsv", header = T, row.names = 1)
+SD02_pval_1 <- read.table("../dataset/Sparcc/cutoff_1/SD02/SD02_pvals.two_sided.tsv", header = T, row.names = 1)
+SD02_rb_1 <- read.table("../dataset/Sparcc/SD02_rarefy10000_v2_0.001_rb.tsv", header = T, row.names = 1)
+SD02_tax_1 <- read.csv("../dataset/taxonomy/SD02_taxonomy.csv")
+
+
+SD04_cor_1 <- read.table("../dataset/Sparcc/cutoff_1/SD04/SD04_cov_mat_SparCC.tsv", header = T, row.names = 1)
+SD04_pval_1 <- read.table("../dataset/Sparcc/cutoff_1/SD04/SD04_pvals.two_sided.tsv", header = T, row.names = 1)
+SD04_rb_1 <- read.table("../dataset/Sparcc/SD04_rarefy10000_v2_0.001_rb.tsv", header = T, row.names = 1)
+SD04_tax_1 <- read.csv("../dataset/taxonomy/SD04_taxonomy.csv")
+
+
+sxtr_cor_1 <- read.table("../dataset/Sparcc/cutoff_1/sxtr/sxtr_cov_mat_SparCC.tsv", header = T, row.names = 1)
+sxtr_pval_1 <- read.table("../dataset/Sparcc/cutoff_1/sxtr/sxtr_pvals.two_sided.tsv", header = T, row.names = 1)
+sxtr_rb_1 <- read.table("../dataset/Sparcc/sxtr_rarefy10000_v2_0.001_rb.tsv", header = T, row.names = 1)
+sxtr_tax_1 <- read.csv("../dataset/taxonomy/sxtr_taxonomy.csv")
+```
+
+
+
+#### curation and plot 
+```{r}
+cornet_plot <- function(mcor=SD01_cor, 
+                        mpval=SD01_pval, 
+                        mrb=SD01_rb5, 
+                        tax=SD01_tax, 
+                        type="SD01_5"){
+  
+
+  # mcor <- SD01_cor
+  # mpval <- SD01_pval
+  # mrb <- SD01_rb5
+  # tax <- SD01_tax
+  # type="SD01_05"
+  
+  # trim all NA in pvalue < 0.05
+  mpval[mpval > 0.05] <- NA
+  remain <- apply(mpval, 1, function(x){length(x[!is.na(x)])}) %>% data.frame() %>%
+    setNames("counts") %>%
+    rownames_to_column("OTUID") %>%
+    filter(counts > 0)
+  remain_pval <- mpval[as.character(remain$OTUID), as.character(remain$OTUID)]
+  
+  # remove non significant edges 
+  remain_cor <- mcor[as.character(remain$OTUID), as.character(remain$OTUID)]
+  for(i in 1:nrow(remain_pval)){
+    for(j in 1:ncol(remain_pval)){
+      if(is.na(remain_pval[i, j])){
+        remain_cor[i, j] <- 0
+      }
+    }
+  }
+  
+  # OTU relative abundance and taxonomy 
+  rb_tax <- mrb %>% rownames_to_column("OTUID") %>%
+    filter(OTUID%in%as.character(remain$OTUID)) %>%
+    group_by(OTUID) %>%
+    rowwise() %>%
+    mutate(SumAbundance=mean(c_across(everything()))) %>%
+    ungroup() %>%
+    inner_join(tax, by="OTUID") %>%
+    dplyr::select("OTUID", "SumAbundance", "Genus") %>%
+    mutate(Genus=gsub("g__Candidatus", "Ca.", Genus),
+           Genus=gsub("_", " ", Genus)) %>%
+    mutate(Genus=factor(as.character(Genus)))
+  
+  # 构建igraph对象
+  igraph <- graph.adjacency(as.matrix(remain_cor), mode="undirected", weighted=TRUE, diag=FALSE)
+  
+  # 去掉孤立点
+  bad.vs <- V(igraph)[degree(igraph) == 0]
+  igraph <- delete.vertices(igraph, bad.vs)
+  
+  # 将igraph weight属性赋值到igraph.weight
+  igraph.weight <- E(igraph)$weight
+  
+  # 做图前去掉igraph的weight权重，因为做图时某些layout会受到其影响
+  E(igraph)$weight <- NA
+  
+  
+  number_cor <- paste0("postive correlation=", sum(igraph.weight > 0), "\n",
+                       "negative correlation=",  sum(igraph.weight < 0))
+  
+  # set edge color，postive correlation 设定为red, negative correlation设定为blue
+  E.color <- igraph.weight
+  E.color <- ifelse(E.color > 0, "red", ifelse(E.color < 0, "blue", "grey"))
+  E(igraph)$color <- as.character(E.color)
+  
+  # 可以设定edge的宽 度set edge width，例如将相关系数与edge width关联
+  E(igraph)$width <- abs(igraph.weight)
+  
+  # set vertices size
+  igraph.size <- rb_tax %>% filter(OTUID%in%V(igraph)$name) 
+  igraph.size.new <- log((igraph.size$SumAbundance) * 1000000)
+  V(igraph)$size <- igraph.size.new
+  
+  # set vertices color
+  igraph.col <- rb_tax %>% filter(OTUID%in%V(igraph)$name)
+  pointcolor <- c("green","deeppink","deepskyblue","yellow","brown","pink","gray","cyan","peachpuff")
+  pr <- levels(igraph.col$Genus)
+  pr_color <- pointcolor[1:length(pr)]
+  levels(igraph.col$Genus) <- pr_color
+  V(igraph)$color <- as.character(igraph.col$Genus)
+  
+  # 按模块着色
+  # fc <- cluster_fast_greedy(igraph, weights=NULL)
+  # modularity <- modularity(igraph, membership(fc))
+  # comps <- membership(fc)
+  # colbar <- rainbow(max(comps))
+  # V(igraph)$color <- colbar[comps]
+  
+  filename <- paste0("../figure/03.Network/", type, "_Sparcc.pdf")
+  pdf(file = filename, width = 10, height = 10)
+  par(family="serif")
+  plot(igraph,
+     main="Co-occurrence network",
+     layout=layout_in_circle,
+     edge.lty=1,
+     edge.curved=TRUE,
+     margin=c(0,0,0,0))
+  legend(x=.8, y=-1, bty = "n",
+         legend=pr,
+         fill=pr_color, border=NA)
+  text(x=.3, y=-1.2, labels=number_cor, cex = 1.5)
+  dev.off()
+  
+  # calculate OTU 
+  remain_cor_sum <- apply(remain_cor, 1, function(x){
+    res1 <- as.numeric(length(x[x>0]))
+    res2 <- as.numeric(length(x[x<0]))
+    res <- c(res1, res2)
+  }) %>% t() %>% data.frame() %>%
+    setNames(c("Negative", "Positive")) %>%
+    rownames_to_column("OTUID")
+  
+  file_cor <- paste0("../figure/03.Network/", type, "_Sparcc_negpos.csv")
+  write.csv(remain_cor_sum, file = file_cor, row.names = F)
+}
+```
+
+### plot
+```{r}
+cornet_plot(mcor=SD01_cor, 
+            mpval=SD01_pval, 
+            mrb=SD01_rb5, 
+            tax=SD01_tax, 
+            type="SD01_5")
+
+cornet_plot(mcor=SD02_cor, 
+            mpval=SD02_pval, 
+            mrb=SD02_rb5, 
+            tax=SD02_tax, 
+            type="SD02_5")
+
+cornet_plot(mcor=SD04_cor, 
+            mpval=SD04_pval, 
+            mrb=SD04_rb5, 
+            tax=SD04_tax, 
+            type="SD04_5")
+
+cornet_plot(mcor=sxtr_cor, 
+            mpval=sxtr_pval, 
+            mrb=sxtr_rb5, 
+            tax=sxtr_tax, 
+            type="sxtr_5")
+```
+
+```{r}
+cornet_plot(mcor=SD01_cor_1, 
+            mpval=SD01_pval_1, 
+            mrb=SD01_rb_1, 
+            tax=SD01_tax_1, 
+            type="SD01_1")
+
+cornet_plot(mcor=SD02_cor_1, 
+            mpval=SD02_pval_1, 
+            mrb=SD02_rb_1, 
+            tax=SD02_tax_1, 
+            type="SD02_1")
+
+cornet_plot(mcor=SD04_cor_1, 
+            mpval=SD04_pval_1, 
+            mrb=SD04_rb_1, 
+            tax=SD04_tax_1, 
+            type="SD04_1")
+
+cornet_plot(mcor=sxtr_cor_1, 
+            mpval=sxtr_pval_1, 
+            mrb=sxtr_rb_1, 
+            tax=sxtr_tax_1, 
+            type="sxtr_1")
+```
+
+### reference
+
+1. [Co-occurrence网络图在R中的实现](https://shengxin.ren/article/236)
+
+2. [基础图形美化](https://wly.supernum.tech/2019/11/r%E8%AF%AD%E8%A8%80%E4%B8%AD%E7%9A%84%E5%9F%BA%E7%A1%80%E7%BB%98%E5%9B%BE%E6%96%B9%E5%BC%8F%E4%BB%8B%E7%BB%8D/)
+
+
+### R information
+```{r}
+sessionInfo()
+```

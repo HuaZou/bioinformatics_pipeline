@@ -1,0 +1,248 @@
+---
+title: "SparCC"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+
+# install.packages(c("huge", "pulsar"), dependencies=T)
+# install.packages("E:/Download/SpiecEasi-1.1.0.tar.gz", repos = NULL, type = "source")
+library(SpiecEasi)
+library(igraph)
+```
+
+
+### load data
+```{r}
+SD01 <- read.csv("../dataset/profile/SD01_taxonomy_L7_relative.csv")
+SD02 <- read.csv("../dataset/profile/SD02_taxonomy_L7_relative.csv")
+SD04 <- read.csv("../dataset/profile/SD04_taxonomy_L7_relative.csv")
+sxtr <- read.csv("../dataset/profile/sxtr_taxonomy_L7_relative.csv")
+```
+
+
+### plot function
+### plot function
+```{r}
+Sparcc_plot <- function(prof=SD01,
+                        tag="Species",
+                        tag2="s__",
+                        kind="S"){
+  prof=SD01
+  tag <- "Species"
+  tag2 <- "s__"
+  kind="S"
+  
+  if(kind == "S"){
+    dat <- prof %>% select(c(tag, starts_with("SD")))     
+  }else{
+    dat <- prof %>% select(c(tag, starts_with("sxtr"))) 
+  }
+  
+
+  colnames(dat)[which(colnames(dat) == tag)] <- "tax"
+  
+  plotdata <- dat %>% group_by(tax) %>%
+    summarise(across(everything(), sum)) %>%
+    ungroup() 
+  plotdata2 <- plotdata %>% column_to_rownames("tax")
+  plotdata2 <- plotdata2[rowSums(plotdata2) > 0, ]
+  
+  mdat <- plotdata2 %>% rownames_to_column("tax") %>%
+    mutate(tax=gsub(tag2, "", tax)) %>%
+    column_to_rownames("tax")
+  
+  write.table(mdat, file = "SD01_species.tsv", quote = F, sep = "\t", row.names = T)
+  
+  res <- sparcc(t(mdat), iter = 20, inner_iter = 10, th = 0.1)
+  # spiec.out <- spiec.easi(t(mdat), method="mb",icov.select.params=list(rep.num=20))
+  # 
+  # spiec.graph <- adj2igraph(spiec.out$refit, vertex.attr=list(name=rownames(mdat)))
+  # plot_network(spiec.graph, phyloseqobj.f, type="taxa", color="Rank3", label=NULL)
+  
+  # res_boot <- sparccboot(t(mdat))
+  # res_pval <- pval.sparccboot(res, sided = "both")
+  res_cor <- res$Cor %>% data.frame()
+  rownames(res_cor) <- rownames(mdat)
+  colnames(res_cor) <- rownames(mdat)
+  
+  sparcc.graph <- graph.adjacency(res_cor, mode="undirected")
+  
+  pl <- ggplot(data = plotdata3, aes(x=Sample, y=tax, size=Abundance))+
+    geom_point(color=pointcolor)+
+    theme_bw()+
+    labs(y="")+
+    theme(axis.title.x = element_text(face = "bold", color = "black", size = 12),
+          axis.text.y = element_text(color = "black", size = 10),
+          axis.text.x = element_text(color = "black", size = 10, 
+                                     angle = 45, vjust = 1, hjust = 1),
+          text=element_text(family="serif"))
+  return(pl)
+}
+```
+
+### plot
+
+* SD01
+```{r}
+SD01_pl <- pcoa_plot(prof = SD01, type="SD01")
+SD01_pl
+ggsave("../figure/SD01_PCoA_OTU.pdf", SD01_pl, width = 7, height = 4, dpi = 600)
+```
+
+* SD02
+```{r}
+SD02_pl <- pcoa_plot(prof = SD02, type="SD02")
+SD02_pl
+ggsave("../figure/SD02_PCoA_OTU.pdf", SD02_pl, width = 7, height = 4, dpi = 600)
+```
+
+* SD04
+```{r}
+SD04_pl <- pcoa_plot(prof = SD04, type="SD04")
+SD04_pl
+ggsave("../figure/SD04_PCoA_OTU.pdf", SD04_pl, width = 7, height = 4, dpi = 600)
+```
+
+* sxtr
+```{r}
+sxtr_pl <- pcoa_plot(prof = sxtr, type="sxtr")
+sxtr_pl
+ggsave("../figure/sxtr_PCoA_OTU.pdf", sxtr_pl, width = 7, height = 4, dpi = 600)
+```
+
+
+### SparCC analysis
+
+* get count matrix
+```{r}
+# load data 
+SD01 <- read.table("../dataset/SD01_taxonomy_L7.tsv", header = T)
+SD02 <- read.table("../dataset/SD02_taxonomy_L7.tsv", header = T)
+SD04 <- read.table("../dataset/SD04_taxonomy_L7.tsv", header = T)
+sxtr <- read.table("../dataset/sxtr_taxonomy_L7.tsv", header = T)
+
+# get function
+get_profile <- function(prof=SD01,
+                        tag="Species",
+                        tag2="s__",
+                        kind="S",
+                        type="SD01"){
+  # prof=SD01
+  # tag <- "Species"
+  # tag2 <- "s__"
+  # kind="S"
+  # type="SD01"
+  
+  if(kind == "S"){
+    dat <- prof %>% select(c(tag, starts_with("SD")))     
+  }else{
+    dat <- prof %>% select(c(tag, starts_with("sxtr"))) 
+  }
+  
+
+  colnames(dat)[which(colnames(dat) == tag)] <- "tax"
+  
+  plotdata <- dat %>% group_by(tax) %>%
+    summarise(across(everything(), sum)) %>%
+    ungroup() 
+  plotdata2 <- plotdata %>% column_to_rownames("tax")
+  plotdata2 <- plotdata2[rowSums(plotdata2) > 0, ]
+  
+  mdat <- plotdata2 %>% rownames_to_column("tax") %>%
+    mutate(tax=gsub(tag2, "", tax)) %>%
+    column_to_rownames("tax")
+  
+  if(!dir.exists("../dataset/Sparcc/")){
+    dir.create("../dataset/Sparcc/")
+  }
+  filename <- paste0("../dataset/Sparcc/", type, "_", tag, ".tsv")
+  
+  write.table(mdat, file = filename, quote = F, sep = "\t", row.names = T)
+}
+
+# run 
+get_profile(prof = SD01, tag="Species", tag2="s__", kind = "S", type = "SD01")
+get_profile(prof = SD01, tag="Genus", tag2="g__", kind = "S", type = "SD01")
+
+get_profile(prof = SD02, tag="Species", tag2="s__", kind = "S", type = "SD02")
+get_profile(prof = SD02, tag="Genus", tag2="g__", kind = "S", type = "SD02")
+
+get_profile(prof = SD04, tag="Species", tag2="s__", kind = "S", type = "SD04")
+get_profile(prof = SD04, tag="Genus", tag2="g__", kind = "S", type = "SD04")
+
+get_profile(prof = sxtr, tag="Species", tag2="s__", kind = "s", type = "sxtr")
+get_profile(prof = sxtr, tag="Genus", tag2="g__", kind = "s", type = "sxtr")
+```
+
+
+```{bash}
+# http://psbweb05.psb.ugent.be/conet/microbialnetworks/sparcc.php
+git clone git@github.com:JCSzamosi/SparCC3.git
+export PATH=/path/SparCC3:$PATH
+
+# Step 1 - Compute correlations  # count matrix
+python /disk/share/toolkits/SparCC3/SparCC.py arctic_soils_filtered.txt -i 10 --cor_file=arctic_soils_sparcc.tsv > arctic_soils_sparcc.log
+
+# Step 2 - Compute bootstraps
+python /disk/share/toolkits/SparCC3/MakeBootstraps.py arctic_soils_filtered.txt -n 100 -t bootstrap_#.txt -p pvals/ >> arctic_soils_sparcc.log
+
+# Step 3 - Compute p-values
+for n in {0..100}; do /disk/share/toolkits/SparCC3/SparCC.py pvals/bootstrap_${n}.txt -i 5 --cor_file=pvals/bootstrap_cor_${n}.txt >> arctic_soils_sparcc.log; done
+
+python /disk/share/toolkits/SparCC3/PseudoPvals.py arctic_soils_sparcc.tsv pvals/bootstrap_cor_#.txt 100 -o pvals/pvals.two_sided.txt -t two_sided >> arctic_soils_sparcc.log
+```
+
+* plot 
+```{r}
+library(igraph)
+
+cor_sparcc <- read.delim("../dataset/Sparcc/SD01_Species_cov_mat_SparCC.out", 
+                         row.names = 1, sep = "\t", check.names = FALSE)
+pvals <- read.delim("../dataset/Sparcc/SD01_Species_pvals_two_sided.txt", 
+                    row.names = 1, sep = "\t", check.names = FALSE)
+
+#保留 |相关性|≥0.2 且 p<0.05的值
+cor_sparcc[abs(cor_sparcc) < 0.2] <- 0
+pvals[pvals >= 0.05] <- -1
+pvals[pvals < 0.05 & pvals >= 0] <- 1
+pvals[pvals == -1] <- 0
+
+#筛选后的邻接矩阵
+adj <- as.matrix(cor_sparcc) * as.matrix(pvals)
+diag(adj) <- 0    #将相关矩阵中对角线中的值（代表了自相关）转为 0
+
+#邻接矩阵 -> igraph 的邻接列表，获得含权的无向网络
+g <- graph_from_adjacency_matrix(as.matrix(adj), 
+                                 mode = "undirected",
+                                 weighted = TRUE,
+                                 diag = FALSE)
+
+
+#这种转换模式下，默认的边权重代表了 sparcc 计算的相关性（存在负值）
+#由于边权重通常为正值，因此最好取个绝对值，相关性重新复制一列作为记录
+E(g)$sparcc <- E(g)$weight
+E(g)$weight <- abs(E(g)$weight)
+E(g)[c(2)]$lable <- "M"
+E(g)$color <- "grey70"
+E(g)[c(2)]$color <- "red"
+# E(g)[c(2)]$width <- 2
+
+plot(g, layout = layout.fruchterman.reingold,
+     vertex.size=6,
+     vertex.label=V(g)$name,
+     vertex.label.cex=1,
+     vertex.label.dist=0.4,
+     vertex.label.color="black")
+```
+
+### R information
+```{r}
+sessionInfo()
+```
+

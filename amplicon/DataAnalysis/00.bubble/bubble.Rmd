@@ -1,0 +1,176 @@
+---
+title: "bubble"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+
+colors <- c('red', 'blue', 'green', 'grey')
+```
+
+
+### load data
+```{r}
+SD01 <- read.table("../dataset/profile/SD01_taxonomy_L7.tsv", header = T)
+SD02 <- read.table("../dataset/profile/SD02_taxonomy_L7.tsv", header = T)
+SD04 <- read.table("../dataset/profile/SD04_taxonomy_L7.tsv", header = T)
+sxtr <- read.table("../dataset/profile/sxtr_taxonomy_L7.tsv", header = T)
+```
+
+
+### curate data 
+```{r}
+# relative abundance
+SD01.rb <- cbind(SD01[, c(1:7)], 
+  SD01 %>% summarise(across(starts_with("SD"), function(x){x/sum(x)})))
+write.csv(SD01.rb, "../dataset/profile/SD01_taxonomy_L7_relative.csv", row.names = F)
+
+
+SD02.rb <- cbind(SD02[, c(1:7)], 
+  SD02 %>% summarise(across(starts_with("SD"), function(x){x/sum(x)})))
+write.csv(SD02.rb, "../dataset/profile/SD02_taxonomy_L7_relative.csv", row.names = F)
+
+
+SD04.rb <- cbind(SD04[, c(1:7)], 
+  SD04 %>% summarise(across(starts_with("SD"), function(x){x/sum(x)})))
+write.csv(SD04.rb, "../dataset/profile/SD04_taxonomy_L7_relative.csv", row.names = F)
+
+
+sxtr.rb <- cbind(sxtr[, c(1:7)], 
+  sxtr %>% summarise(across(starts_with("sxtr"), function(x){x/sum(x)})))
+write.csv(sxtr.rb, "../dataset/profile/sxtr_taxonomy_L7_relative.csv", row.names = F)
+```
+
+
+### plot function
+```{r}
+bubble_plot <- function(prof=SD01.rb,
+                        tag="Species",
+                        tag2="s__",
+                        kind="S",
+                        pointcolor="red"){
+  # prof=SD01.rb
+  # tag <- "Species"
+  # tag2 <- "s__"
+  # kind="S"
+  # pointcolor="red"  
+  
+  if(kind == "S"){
+    dat <- prof %>% select(c(tag, starts_with("SD")))     
+  }else{
+    dat <- prof %>% select(c(tag, starts_with("sxtr"))) 
+  }
+  
+
+  colnames(dat)[which(colnames(dat) == tag)] <- "tax"
+  
+  plotdata <- dat %>% group_by(tax) %>%
+    summarise(across(everything(), sum)) %>%
+    ungroup() 
+  plotdata2 <- plotdata %>% column_to_rownames("tax")
+  plotdata2 <- plotdata2[rowSums(plotdata2) > 0, ]
+  
+  plotdata3 <- plotdata2 %>% rownames_to_column("tax") %>%
+    tidyr::gather(key="Sample", value = "Abundance", -tax) %>%
+    mutate(tax=gsub(tag2, "", tax))
+  
+  pl <- ggplot(data = plotdata3, aes(x=Sample, y=tax, size=Abundance))+
+    geom_point(color=pointcolor)+
+    theme_bw()+
+    labs(y="")+
+    theme(axis.title.x = element_text(face = 'bold', color = 'black', size = 12),
+          axis.text.y = element_text(color = 'black', size = 10),
+          axis.text.x = element_text(color = 'black', size = 10, 
+                                     angle = 45, vjust = 1, hjust = 1),
+          text=element_text(family="serif"))
+  return(pl)
+}
+```
+
+
+### plot
+
+* SD01
+```{r}
+SD01_sp_pl <- bubble_plot(prof = SD01.rb, tag="Species", tag2="s__", kind = "S", pointcolor = colors[1])
+SD01_sp_pl
+ggsave("../figure/00.bubble/SD01_bubble_species.pdf", SD01_sp_pl, width = 7, height = 4, dpi = 600)
+
+SD01_gs_pl <- bubble_plot(prof = SD01.rb, tag="Genus", tag2="g__", kind = "S", pointcolor = colors[1])
+SD01_gs_pl
+ggsave("../figure/00.bubble/SD01_bubble_genus.pdf", SD01_gs_pl, width = 7, height = 3, dpi = 600)
+```
+
+* SD02
+```{r}
+SD02_sp_pl <- bubble_plot(prof = SD02.rb, tag="Species", tag2="s__", kind = "S", pointcolor = colors[2])
+SD02_sp_pl
+ggsave("../figure/00.bubble/SD02_bubble_species.pdf", SD02_sp_pl, width = 7, height = 4, dpi = 600)
+
+SD02_gs_pl <- bubble_plot(prof = SD02.rb, tag="Genus", tag2="g__", kind = "S", pointcolor = colors[2])
+SD02_gs_pl
+ggsave("../figure/00.bubble/SD02_bubble_genus.pdf", SD02_gs_pl, width = 7, height = 3, dpi = 600)
+```
+
+* SD04
+```{r}
+SD04_sp_pl <- bubble_plot(prof = SD04.rb, tag="Species", tag2="s__", kind = "S", pointcolor = colors[3])
+SD04_sp_pl
+ggsave("../figure/00.bubble/SD04_bubble_species.pdf", SD04_sp_pl, width = 7, height = 4, dpi = 600)
+
+SD04_gs_pl <- bubble_plot(prof = SD04.rb, tag="Genus", tag2="g__", kind = "S", pointcolor = colors[3])
+SD04_gs_pl
+ggsave("../figure/00.bubble/SD04_bubble_genus.pdf", SD04_gs_pl, width = 7, height = 3, dpi = 600)
+```
+
+* sxtr
+```{r}
+sxtr_sp_pl <- bubble_plot(prof = sxtr.rb, tag="Species", tag2="s__", kind = "s", pointcolor = colors[4])
+sxtr_sp_pl
+ggsave("../figure/00.bubble/sxtr_bubble_species.pdf", sxtr_sp_pl, width = 7, height = 4, dpi = 600)
+
+sxtr_gs_pl <- bubble_plot(prof = sxtr.rb, tag="Genus", tag2="g__", kind = "s", pointcolor = colors[4])
+sxtr_gs_pl
+ggsave("../figure/00.bubble/sxtr_bubble_genus.pdf", sxtr_gs_pl, width = 7, height = 3, dpi = 600)
+```
+
+
+### compare L7 and L6
+```{r}
+SD01_L6 <- read.table("../dataset/profile/SD01_taxonomy_L6.tsv", header = T)
+
+# relative abundance
+SD01_L6 <- cbind(SD01_L6[, c(1:6)], 
+  SD01_L6 %>% summarise(across(starts_with("SD"), function(x){x/sum(x)})))
+
+SD01_L7 <- read.csv("../dataset/profile/SD01_taxonomy_L7_relative.csv", header = T)
+
+SD01_L6_genus <- SD01_L6 %>% select("Genus", starts_with("SD")) %>%
+  group_by(Genus) %>%
+  summarise(across(everything(), sum)) %>%
+  ungroup()
+
+SD01_L7_genus <- SD01_L7 %>% select("Genus", starts_with("SD")) %>% 
+  group_by(Genus) %>%
+  summarise(across(everything(), sum)) %>%
+  ungroup()
+
+mdat <- rbind(SD01_L6_genus %>% mutate(Type="SD01_L6_genus"),
+              SD01_L7_genus %>% mutate(Type="SD01_L7_genus"))
+
+head(mdat)
+```
+
+
+
+### R information
+```{r}
+sessionInfo()
+```
+

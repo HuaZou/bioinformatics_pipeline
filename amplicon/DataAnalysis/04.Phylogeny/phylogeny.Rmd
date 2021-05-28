@@ -1,0 +1,174 @@
+---
+title: "tree"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+
+library(dplyr)
+library(tibble)
+library(ggtree)
+library(ggplot2)
+```
+
+
+### load data 
+```{r}
+SD01_tree <- read.tree("../dataset/phylogeny/SD01_tree.nwk")     
+SD01_taxo <- read.csv("../dataset/taxonomy/SD01_taxonomy.csv")
+
+SD02_tree <- read.tree("../dataset/phylogeny/SD02_tree.nwk")
+SD02_taxo <- read.csv("../dataset/taxonomy/SD02_taxonomy.csv")
+
+SD04_tree <- read.tree("../dataset/phylogeny/SD04_tree.nwk")
+SD04_taxo <- read.csv("../dataset/taxonomy/SD04_taxonomy.csv")
+
+sxtr_tree <- read.tree("../dataset/phylogeny/sxtr_tree.nwk")
+sxtr_taxo <- read.csv("../dataset/taxonomy/sxtr_taxonomy.csv")
+```
+
+
+### curation 
+```{r}
+tree_plot <- function(tree_file=SD01_tree,
+                      tax_file=SD01_taxo,
+                      type="SD01"){
+   
+  # tree_file=sxtr_tree
+  # tax_file=sxtr_taxo
+  # type="sxtr"
+  
+  otuid <- intersect(tax_file$OTUID, tree_file$tip.label)
+  
+  tax_file_new <- tax_file %>% filter(OTUID%in%otuid) %>%
+    mutate(Genus=factor(as.character(Genus)),
+           Genus=gsub("g__Candidatus_", "Ca. ", Genus)) %>%
+    mutate(OTUID2=ifelse(grepl("OTU", OTUID), as.character(OTUID), 
+                        paste(Genus, OTUID, sep = " ")),
+           OTUID2=gsub("_", "", OTUID2))
+  tree_lable <- data.frame(Order=seq(1, length(tree_file$tip.label), 1),
+                           OTUID=tree_file$tip.label) %>%
+    inner_join(tax_file_new, by="OTUID") %>%
+    arrange(Order)
+  
+  tree_file$tip.label <- tree_lable$OTUID2
+  
+  groupInfo <- with(tax_file_new, split(OTUID2, Genus)) 
+  tree <- groupOTU(tree_file, groupInfo)
+  
+  
+  # get nodes 
+  # node_pl <- ggtree(tree)+geom_text2(aes(label=node))+
+  #   geom_tiplab()
+  
+  pl <- ggtree(tree, layout = "circular", ladderize = F, size = .8, branch.length = "none")+
+         geom_tiplab2(size = 3.5, offset = 0.1, family="serif")+
+         geom_tippoint(aes(color = group), shape = 16, size = 3)+
+         guides(color=guide_legend(title = "Genus"))+
+         scale_color_manual(values = c("Ca. Brocadia"="green", "Ca. Kuenenia"="steelblue",
+                                      "Ca. Scalindua"="red", "Unclassified"="grey"))+ 
+         theme(legend.position = "right",
+               text=element_text(family="serif")) 
+  
+  if(type == "SD01"){
+    res <- pl +  
+        # scale_color_manual(values = c("Ca. Brocadia"="green", "Ca. Kuenenia"="steelblue",
+        #                               "Ca. Scalindua"="red", "Unclassified"="grey"))+ 
+         # geom_hilight(node = 83, fill="grey", alpha = 0.5)+
+         geom_hilight(node = 123, fill = "red", alpha = 0.5)+
+         geom_hilight(node = 114, fill = "steelblue", alpha = 0.5)+
+         geom_hilight(node = 107, fill = "green", alpha = 0.5)+
+         # geom_cladelabel(node = 83, label = "Unclassified",
+         #                offset = 12, barsize = 2, size = 6, 
+         #                hjust = -10, vjust = -20, color = "grey")+
+         geom_cladelabel(node = 123, label = "Ca. Scalindua",
+                        offset = 10, barsize = 2, family="serif", 
+                        vjust = 1, color = "red")+
+         geom_cladelabel(node = 114, label = "Ca. Kuenenia",
+                        offset = 10, barsize = 2, family="serif", 
+                        hjust = 1, color = "steelblue")+
+         geom_cladelabel(node = 107, label = "Ca. Brocadia",
+                        offset = 10, barsize = 2, family="serif", 
+                        hjust = 1, color = "green")
+  
+  }else if(type == "SD02"){
+    res <-  pl + 
+         geom_hilight(node = 176, fill="red", alpha = 0.5)+
+         geom_hilight(node = 144, fill="steelblue", alpha = 0.5)+
+         geom_hilight(node = 150, fill="green", alpha = 0.5)+
+         geom_cladelabel(node=176, label="Ca. Scalindua",
+                        offset=10, barsize = 2, family="serif",
+                        vjust=1, color="red")+
+         geom_cladelabel(node=144, label="Ca. Kuenenia",
+                        offset=10, barsize = 2, family="serif",
+                        hjust=1, color="steelblue")+
+         geom_cladelabel(node=150, label="Ca. Brocadia",
+                        offset=10, barsize = 2, family="serif",
+                        hjust=1, color="green")
+    
+  }else if(type == "SD04"){
+      res <-  pl + 
+         geom_hilight(node = 108, fill="red", alpha = 0.5)+
+         geom_hilight(node = 127, fill="steelblue", alpha = 0.5)+
+         geom_hilight(node = 147, fill="green", alpha = 0.5)+
+         geom_cladelabel(node=108, label="Ca. Scalindua",
+                        offset=10, barsize = 2, family="serif",
+                        vjust=1, color="red")+
+         geom_cladelabel(node=127, label="Ca. Kuenenia",
+                        offset=10, barsize = 2, family="serif",
+                        hjust=1, color="steelblue")+
+         geom_cladelabel(node=147, label="Ca. Brocadia",
+                        offset=10, barsize = 2, family="serif",
+                        hjust=1, color="green")
+    
+  }else if(type == "sxtr"){
+      res <-  pl + 
+         geom_hilight(node = 2, fill="steelblue", alpha = 0.5)+
+         geom_hilight(node = 19, fill="green", alpha = 0.5)+
+         geom_cladelabel(node=2, label="Ca. Kuenenia",
+                        offset=5, barsize = 2, family="serif",
+                        hjust=1, color="steelblue")+
+         geom_cladelabel(node=19, label="Ca. Brocadia",
+                        offset=5, barsize = 2, family="serif",
+                        hjust=1, color="green")
+    
+  }
+
+  return(res)
+}
+```
+
+
+### plot
+```{r}
+SD01_phy_pl <- tree_plot(tree_file = SD01_tree, tax_file = SD01_taxo, type="SD01")
+SD01_phy_pl
+ggsave("../figure/04.Phylogeny/SD01_Phylogeny.pdf", SD01_phy_pl, width = 15, height = 15, dpi = 600)
+
+SD02_phy_pl <- tree_plot(tree_file = SD02_tree, tax_file = SD02_taxo, type="SD02")
+SD02_phy_pl
+ggsave("../figure/04.Phylogeny/SD02_Phylogeny.pdf", SD02_phy_pl, width = 15, height = 15, dpi = 600)
+
+SD04_phy_pl <- tree_plot(tree_file = SD04_tree, tax_file = SD04_taxo, type="SD04")
+SD04_phy_pl
+ggsave("../figure/04.Phylogeny/SD04_Phylogeny.pdf", SD04_phy_pl, width = 15, height = 15, dpi = 600)
+
+sxtr_phy_pl <- tree_plot(tree_file = sxtr_tree, tax_file = sxtr_taxo, type="sxtr")
+sxtr_phy_pl
+ggsave("../figure/04.Phylogeny/sxtr_Phylogeny.pdf", sxtr_phy_pl, width = 10, height = 10, dpi = 600)
+```
+
+
+### R information
+```{r}
+sessionInfo()
+```
+
+
+```{r}
+
+```
+

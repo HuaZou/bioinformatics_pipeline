@@ -1,0 +1,136 @@
+---
+title: "mantel correlogram"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(vegan)
+```
+
+
+### load data
+```{r}
+SD01_geo <- read.csv("../dataset/distance/SD01_geodis.csv", row.names = 1)
+SD01_bcd <- read.table("../dataset/distance/SD01_bray_curtis.tsv")
+SD01_weight <- read.table("../dataset/distance/SD01_weighted_unifrac.tsv")
+SD01_unweight <- read.table("../dataset/distance/SD01_weighted_unifrac.tsv")
+
+SD02_geo <- read.csv("../dataset/distance/SD02_geodis.csv", row.names = 1)
+SD02_bcd <- read.table("../dataset/distance/SD02_bray_curtis.tsv")
+SD02_weight <- read.table("../dataset/distance/SD02_weighted_unifrac.tsv")
+SD02_unweight <- read.table("../dataset/distance/SD02_weighted_unifrac.tsv")
+
+SD04_geo <- read.csv("../dataset/distance/SD04_geodis.csv", row.names = 1)
+SD04_bcd <- read.table("../dataset/distance/SD04_bray_curtis.tsv")
+SD04_weight <- read.table("../dataset/distance/SD04_weighted_unifrac.tsv")
+SD04_unweight <- read.table("../dataset/distance/SD04_weighted_unifrac.tsv")
+
+sxtr_geo <- read.csv("../dataset/distance/sxtr_geodis.csv", row.names = 1)
+sxtr_bcd <- read.table("../dataset/distance/sxtr_bray_curtis.tsv")
+sxtr_weight <- read.table("../dataset/distance/sxtr_weighted_unifrac.tsv")
+sxtr_unweight <- read.table("../dataset/distance/sxtr_weighted_unifrac.tsv")
+```
+
+
+### plot function
+```{r}
+get_correlogram <- function(geodis=sxtr_geo,
+                             bcddis=sxtr_bcd,
+                             wunif=sxtr_weight,
+                             unwunif=sxtr_unweight,
+                             type="sxtr"){
+  # geodis=sxtr_geo
+  # bcddis=sxtr_bcd
+  # wunif=sxtr_weight
+  # unwunif=sxtr_unweight
+  # type="sxtr"
+  
+  # order rownames and colnames
+  
+  get_mantel <- function(distance=bcddis){
+    
+    # distance=bcddis
+    
+    sid <- intersect(rownames(geodis), rownames(distance))
+    geodis_order <- geodis[sid, sid]
+    distance_order <- distance[sid, sid]
+    
+    # rownames(geodis_order) == rownames(distance_order)
+    # colnames(geodis_order) == colnames(distance_order)
+    
+    # determine the right order 
+    for(i in 1:nrow(geodis_order)){
+      if (rownames(geodis_order)[i] != rownames(distance_order)[i]) {
+        stop(paste0(i, " Wrong"))
+      }
+    }
+    
+    for(i in 1:ncol(geodis_order)){
+      if (colnames(geodis_order)[i] != colnames(distance_order)[i]) {
+        stop(paste0(i, " Wrong"))
+      }
+    }
+    
+    res <- mantel.correlog(dist(distance_order), D.geo = dist(geodis_order), nperm = 999) 
+    return(res)
+  }
+  
+  bcd_res <- get_mantel(distance = bcddis)
+  wunif_res <- get_mantel(distance = wunif)
+  unwunif_res <- get_mantel(distance = unwunif)
+  
+  res <- rbind(
+    data.frame(bcd_res$mantel.res) %>% mutate(Distance="BCD"),
+    data.frame(wunif_res$mantel.res) %>% mutate(Distance="Weighted_unifrac"),
+    data.frame(unwunif_res$mantel.res) %>% mutate(Distance="Unweighted_unifrac"))
+  
+  filename <- paste0("../dataset/distance/", type, "_Mantel_correlogram.tsv")
+  write.table(res, file = filename, quote = F, sep = "\t", row.names = F)
+}
+```
+
+### get result
+
+```{r}
+get_correlogram(geodis=SD01_geo,
+                bcddis=SD01_bcd,
+                wunif=SD01_weight,
+                unwunif=SD01_unweight,
+                type="SD01")
+
+get_correlogram(geodis=SD02_geo,
+                bcddis=SD02_bcd,
+                wunif=SD02_weight,
+                unwunif=SD02_unweight,
+                type="SD02")
+
+get_correlogram(geodis=SD04_geo,
+                bcddis=SD04_bcd,
+                wunif=SD04_weight,
+                unwunif=SD04_unweight,
+                type="SD04")
+
+get_correlogram(geodis=sxtr_geo,
+                bcddis=sxtr_bcd,
+                wunif=sxtr_weight,
+                unwunif=sxtr_unweight,
+                type="sxtr")
+```
+
+
+### R information
+```{r}
+sessionInfo()
+```
+
+
+### Reference
+
+1. [Mantel correlogram - Analysis of Multivariate Ecological Data](http://biol09.biol.umontreal.ca/Trieste16/ICTP_Theory_DB_2016_Day4.pdf)
+
+
