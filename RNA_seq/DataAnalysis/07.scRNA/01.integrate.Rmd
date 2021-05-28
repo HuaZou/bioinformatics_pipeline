@@ -1,0 +1,237 @@
+---
+title: "Human scRNA Integration: normal heart tissue"
+date: "created: 2021-02-01; modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(Seurat)
+library(tibble)
+library(readr)
+library(patchwork)
+library(ggplot2)
+library(data.table)
+
+# rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 10000 * 1024^2)
+```
+
+
+### load data 
+```{r}
+normal_count <- fread("../../Study/Public_data/scRNA-seq_human/GSE109816_normal_heart_umi_matrix.csv") %>% 
+                  column_to_rownames("V1")
+failure_count <- fread("../../Study/Public_data/scRNA-seq_human/GSE121893_human_heart_sc_umi.csv") %>%
+                  column_to_rownames("V1")
+
+normal_phen <- read_csv("../../Study/Public_data/scRNA-seq_human/GSE109816_normal_heart_phenotype_20201207.csv") %>% 
+                  column_to_rownames("ID")
+failure_phen <- read_csv("../../Study/Public_data/scRNA-seq_human/GSE121893_human_heart_phenotype_20201207.csv") %>% 
+                  column_to_rownames("ID")
+```
+
+
+### curate count and metadata
+```{r}
+CreateObject <- function(count=normal_count, 
+                         metadata=normal_phen, 
+                         proj="GSE109816"){
+  
+  # count=n_count
+  # metadata=phen 
+  # proj="GSE109816"
+  
+  sid <- intersect(colnames(count), rownames(metadata))
+  prf <- count %>% dplyr::select(sid)
+  phe <- metadata[sid, ]
+  
+  Seurat_Object <- CreateSeuratObject(counts = prf, 
+                             project = proj,
+                             assay = "RNA",
+                             min.cells = 3, 
+                             min.features = 400,
+                             meta.data = phe)
+  Seurat_Object[["Batch"]] <-  proj
+  return(Seurat_Object)
+}
+
+normal_SeuratObject_v1 <- CreateObject(count=normal_count,
+                                    metadata=normal_phen,
+                                    proj="GSE109816")
+
+normal_SeuratObject_v2 <- CreateObject(count=failure_count,
+                                    metadata=normal_phen,
+                                    proj="GSE121893")
+```
+
+
+### filter by the percentage of two kind genes
+
+* mitochondrion gene 
+
+* Ribosome gene
+
+```{r}
+filter_low_quality <- function(Sobject=normal_SeuratObject_v1,
+                               Pattern="^MTND|^MTATP|^MTCO|^MTCYB"){
+
+  # Sobject=normal_SeuratObject_v1
+  # Pattern="^MTND|^MTATP|^MTCO|^MTCYB"
+  
+  Sobject[["percent.mt"]] <- PercentageFeatureSet(Sobject, pattern = Pattern)
+  # Sobject[["percent.rb"]] <- PercentageFeatureSet(Sobject, pattern = "^RP[SL]")
+
+  # before 
+  pl_before <- VlnPlot(Sobject, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), 
+          ncol = 2, pt.size = 0.2) + NoLegend()
+  
+  # quantle
+  ncount_q <- quantile(Sobject@meta.data$nCount_RNA, c(0.025, 0.975))
+  print(ncount_q)
+  nfeature_q <- quantile(Sobject@meta.data$nFeature_RNA, c(0.025, 0.975))
+  print(nfeature_q)
+  mt_q <- quantile(Sobject@meta.data$percent.mt, c(0.025, 0.975))
+
+  
+  # filter 
+  Sobject <- subset(Sobject, subset = nFeature_RNA > as.numeric(nfeature_q)[1] & 
+                                      nFeature_RNA < as.numeric(nfeature_q)[2] &
+                                      nCount_RNA > as.numeric(ncount_q)[1] & 
+                                      nCount_RNA < as.numeric(ncount_q)[2] &
+                                      percent.mt < as.numeric(mt_q)[2] )
+  #after 
+  pl_after <- VlnPlot(Sobject, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), 
+          ncol = 2, pt.size = 0.2) + NoLegend()
+  
+  pl <- cowplot::plot_grid(pl_before, pl_after, labels = c("Before", "After"), ncol = 2, align = "hv")
+  
+  res <- list(sobject=Sobject, spl=pl)
+  return(res)
+}
+
+
+normal_Seurat1 <- filter_low_quality(Sobject=normal_SeuratObject_v1, Pattern="^MTND|^MTATP|^MTCO|^MTCYB")
+normal_SeuratObject1 <- normal_Seurat1$sobject
+
+normal_Seurat2 <- filter_low_quality(Sobject=normal_SeuratObject_v2, Pattern="^MTND|^MTATP|^MTCO|^MTCYB")
+normal_SeuratObject2 <- normal_Seurat2$sobject
+```
+```{r, fig.height=8}
+normal_Seurat1$spl
+```
+
+
+### merge seurat object
+```{r}
+seurat_object <- merge(x = normal_SeuratObject1, y = normal_SeuratObject2)
+seurat_object <- FindVariableFeatures(object = seurat_object, 
+                                      selection.method = "vst", 
+                                      nfeatures = 2000, 
+                                      verbose = FALSE)
+seurat_object <- ScaleData(object = seurat_object, features = rownames(seurat_object))
+seurat_object <- RunPCA(seurat_object, npcs = 30, verbose = FALSE)
+seurat_object <- RunTSNE(seurat_object, reduction = "pca", verbose = FALSE, check_duplicates = FALSE)
+seurat_object <- RunUMAP(seurat_object, reduction = "pca", dims = 1:30)
+DimPlot(seurat_object, reduction = "tsne", split.by = "Batch")
+```
+
+
+### Cell cycle scoring
+```{r}
+load("../../Result/sc_profile/CellCycle/hsp.cycle.rda")
+
+cell_cycle <- function(x_object){
+  
+  # Normalize counts
+  x_phase <- NormalizeData(x_object)
+  # Score cells for cell cycle
+  x_phase <- CellCycleScoring(x_phase,g2m.features = g2m_genes,s.features = s_genes)
+  # Identify the most variable genes
+  x_phase <- FindVariableFeatures(x_phase, 
+                       selection.method = "vst",
+                       nfeatures = 2000, 
+                       verbose = FALSE) 
+  # Scale the counts
+  x_phase <- ScaleData(x_phase)
+  # Perform PCA
+  x_phase <- RunPCA(x_phase)
+  # Plot the PCA colored by cell cycle phase
+  pl <- DimPlot(x_phase,
+          reduction = "pca",
+          group.by= "Phase",
+          split.by = "Phase")  
+  return(pl)
+}
+
+cell_cycle(seurat_object)
+```
+
+_We do not see large differences due to cell cycle phase. Based on this plot, we would not regress out the variation due to cell cycle._ 
+
+### Normalization and Integration
+```{r}
+# sctransform on all samples
+split_seurat <- SplitObject(seurat_object, split.by = "Batch")
+for (i in 1:length(split_seurat)) {
+  split_seurat[[i]] <- NormalizeData(split_seurat[[i]], verbose = TRUE)
+  split_seurat[[i]] <- CellCycleScoring(split_seurat[[i]], 
+                                     g2m.features = g2m_genes,
+                                     s.features = s_genes)
+  split_seurat[[i]] <- SCTransform(split_seurat[[i]],
+                                vars.to.regress = c("percent.mt"),
+                                verbose = FALSE)
+}
+
+# Check which assays are stored in objects
+split_seurat$GSE109816@assays
+```
+
+
+### **Integrating** samples using shared highly variable genes
+```{r}
+# Select the most variable features to use for integration
+data.features <- SelectIntegrationFeatures(object.list = split_seurat, 
+                                           nfeatures = 2000)
+# Prepare the SCT list object for integration
+split_seurat <- PrepSCTIntegration(object.list = split_seurat, 
+                                anchor.features = data.features, 
+                                verbose = FALSE)
+# Find best buddies - can take a while to run
+data.anchors <- FindIntegrationAnchors(object.list = split_seurat, 
+                                       normalization.method = "SCT", 
+                                       anchor.features = data.features, 
+                                       verbose = FALSE)
+# Integrate across conditions
+data.integrated <- IntegrateData(anchorset = data.anchors, 
+                                 normalization.method = "SCT", 
+                                 verbose = FALSE)
+
+# save integrated data 
+saveRDS(data.integrated, "../../Result/sc_profile/RDS/data.normal.sct.rds", compress = TRUE)
+```
+
+
+### output
+```{r}
+if(dir.exists("../../Result/sc_profile/hsp_normal/")){
+  dir.create("../../Result/sc_profile/hsp_normal/")
+}
+
+saveRDS(data.integrated, "../../Result/sc_profile/hsp_normal/data.normal.RDS", compress = TRUE)
+```
+
+
+### R sessinfo
+```{r}
+sessionInfo()
+```
+
+
+### reference 
+
+1. [Seurat Data normalization and PCA](https://learn.gencore.bio.nyu.edu/single-cell-rnaseq/seurat-part-3-data-normalization/#:~:text=By%20default%2C%20Seurat%20implements%20a%20global-scaling%20normalization%20method,genes%20and%20focuses%20on%20these%20for%20downstream%20analysis.)

@@ -1,0 +1,220 @@
+---
+title: "Metabolism and immune score relationship"
+date: "Created: 2021-02-02 modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(patchwork)
+```
+
+
+### load data 
+```{r}
+# pathway score
+cardiomyocyte_PScore <- read.csv("../../Result/sc_profile/Average/ssgsea_cardiomyocyte_PathwayScore_normal.csv", row.names = 1)
+endothelial_PScore <- read.csv("../../Result/sc_profile/Average/ssgsea_endothelial_PathwayScore_normal.csv", row.names = 1)
+fibroblast_PScore <- read.csv("../../Result/sc_profile/Average/ssgsea_fibroblast_PathwayScore_normal.csv", row.names = 1)
+smooth_PScore <- read.csv("../../Result/sc_profile/Average/ssgsea_smooth_muscle_PathwayScore_normal.csv", row.names = 1)
+macrophage_PScore <- read.csv("../../Result/sc_profile/Average/ssgsea_macrophage_PathwayScore_normal.csv", row.names = 1)
+all_Pscore <- read.csv("../../Result/sc_profile/Average/ssgsea_all_PathwayScore_normal.csv", row.names = 1)
+
+# immune score
+macrophage_ImmuneScore <- read.csv("../../Result/sc_profile/Average/macrophage_normal_ImmuneScore.csv", row.names = 1)
+all_ImmuneScore <- read.csv("../../Result/sc_profile/Average/All_normal_ImmuneScore.csv", row.names = 1)
+```
+
+
+### curate data 
+```{r}
+cor_plot <- function(pscore = all_Pscore,
+                     iscore = all_ImmuneScore,
+                     tag = "Glycolysis"){
+  
+  # pscore = all_Pscore
+  # iscore = all_ImmuneScore
+  # tag <- "Glycolysis"
+
+  mdat <- pscore %>% rownames_to_column("SampleID") %>%
+          tidyr::gather(key="pathway", value="PathwayScore", 
+                        -c("SampleID")) %>%
+          inner_join(iscore %>% dplyr::select(ImmuneScore) %>%
+                       rownames_to_column("SampleID"), 
+                     by="SampleID")
+  
+  xlab <- paste(tag, "activity score")
+  mdat_cln <- mdat %>% filter(pathway%in%tag)
+  
+
+  fit <- lm(formula = ImmuneScore ~ PathwayScore, data = mdat_cln)
+  lm.lst <- list(a = as.numeric(format(coef(fit)[1], digits = 4)),
+              b = as.numeric(format(coef(fit)[2], digits = 4)),
+              r2 = format(summary(fit)$r.squared, digits = 4),
+              p = format(summary(fit)$coefficients[2,4], digits = 4))
+  eq <- substitute(italic(y) == a + b %.% italic(x)~","~italic(R)^2~"="~r2~","~italic(P)~"="~p, lm.lst)
+  lab <- substitute(~italic(R)^2~"="~r2~","~italic(P)~"="~p, lm.lst)
+    
+  PScore <- with(mdat_cln, (max(PathwayScore)-min(PathwayScore))/2+min(PathwayScore))
+  IScore <- with(mdat_cln, max(ImmuneScore)-(max(ImmuneScore)-min(ImmuneScore))/8)
+    
+  dat_lab <- data.frame(PathwayScore=PScore,
+                       ImmuneScore=IScore,
+                       label=as.character(as.expression(lab)))
+  
+    
+  pl <- ggplot(mdat_cln, aes(x=PathwayScore, y=ImmuneScore))+ 
+    geom_point()+
+    stat_smooth(method='lm', formula = y~x, color="red")+
+    geom_text(data=dat_lab, aes(x=PathwayScore, y=ImmuneScore, label = label),
+                size = 4, parse = TRUE) +
+    labs(x=xlab)+
+    theme_bw()+
+    theme(axis.title = element_text(face = 'bold',color = 'black',size = 10),
+          axis.text.y = element_text(color = 'black',size = 8),
+          axis.text.x = element_text(color = 'black',size = 8),
+          strip.text = element_text(size = 10, face = "bold"))
+  
+  return(pl)  
+}
+```
+
+
+### All
+
+#### All_PScore vs All_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+Glycolysis_All <- cor_plot(pscore = all_Pscore,
+                            iscore = all_ImmuneScore,
+                            tag = "Glycolysis")
+GlucoseOxidation_All <- cor_plot(pscore = all_Pscore,
+                                 iscore = all_ImmuneScore,
+                                tag = "GlucoseOxidation")
+FattyAcidOxidation_All <- cor_plot(pscore = all_Pscore,
+                                    iscore = all_ImmuneScore,
+                                    tag = "FattyAcidOxidation")
+
+(Glycolysis_All / GlucoseOxidation_All / FattyAcidOxidation_All) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+#### All_PScore vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+Glycolysis_macrophage_all <- cor_plot(pscore = all_Pscore,
+                            iscore = macrophage_ImmuneScore,
+                            tag = "Glycolysis")
+GlucoseOxidation_macrophage_all <- cor_plot(pscore = all_Pscore,
+                                  iscore = macrophage_ImmuneScore,
+                                  tag = "GlucoseOxidation")
+FattyAcidOxidation_macrophage_all <- cor_plot(pscore = all_Pscore,
+                                    iscore = macrophage_ImmuneScore,
+                                    tag = "FattyAcidOxidation")
+
+(Glycolysis_macrophage_all / GlucoseOxidation_macrophage_all / FattyAcidOxidation_macrophage_all) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+### macrophage
+
+#### cardiomyocyte_PScore vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+Glycolysis_cardiomyocyte_macrophage <- cor_plot(pscore = cardiomyocyte_PScore,
+                            iscore = macrophage_ImmuneScore,
+                            tag = "Glycolysis")
+GlucoseOxidation_cardiomyocyte_macrophage <- cor_plot(pscore = cardiomyocyte_PScore,
+                                  iscore = macrophage_ImmuneScore,
+                                  tag = "GlucoseOxidation")
+FattyAcidOxidation_cardiomyocyte_macrophage <- cor_plot(pscore = cardiomyocyte_PScore,
+                                    iscore = macrophage_ImmuneScore,
+                                    tag = "FattyAcidOxidation")
+
+(Glycolysis_cardiomyocyte_macrophage / GlucoseOxidation_cardiomyocyte_macrophage / FattyAcidOxidation_cardiomyocyte_macrophage) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+#### fibroblast_PScore vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+Glycolysis_fibroblast_macrophage <- cor_plot(pscore = fibroblast_PScore,
+                            iscore = macrophage_ImmuneScore,
+                            tag = "Glycolysis")
+GlucoseOxidation_fibroblast_macrophage <- cor_plot(pscore = fibroblast_PScore,
+                                  iscore = macrophage_ImmuneScore,
+                                  tag = "GlucoseOxidation")
+FattyAcidOxidation_fibroblast_macrophage <- cor_plot(pscore = fibroblast_PScore,
+                                    iscore = macrophage_ImmuneScore,
+                                    tag = "FattyAcidOxidation")
+
+(Glycolysis_fibroblast_macrophage / GlucoseOxidation_fibroblast_macrophage / FattyAcidOxidation_fibroblast_macrophage) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+#### endothelial_PScore vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+Glycolysis_endothelial_macrophage <- cor_plot(pscore = endothelial_PScore,
+                            iscore = macrophage_ImmuneScore,
+                            tag = "Glycolysis")
+GlucoseOxidation_endothelial_macrophage <- cor_plot(pscore = endothelial_PScore,
+                                  iscore = macrophage_ImmuneScore,
+                                  tag = "GlucoseOxidation")
+FattyAcidOxidation_endothelial_macrophage <- cor_plot(pscore = endothelial_PScore,
+                                    iscore = macrophage_ImmuneScore,
+                                    tag = "FattyAcidOxidation")
+
+(Glycolysis_endothelial_macrophage / GlucoseOxidation_endothelial_macrophage / FattyAcidOxidation_endothelial_macrophage) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+#### smooth_PScore vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+Glycolysis_smooth_macrophage <- cor_plot(pscore = smooth_PScore,
+                            iscore = macrophage_ImmuneScore,
+                            tag = "Glycolysis")
+GlucoseOxidation_smooth_macrophage <- cor_plot(pscore = smooth_PScore,
+                                  iscore = macrophage_ImmuneScore,
+                                  tag = "GlucoseOxidation")
+FattyAcidOxidation_smooth_macrophage <- cor_plot(pscore = smooth_PScore,
+                                    iscore = macrophage_ImmuneScore,
+                                    tag = "FattyAcidOxidation")
+
+(Glycolysis_smooth_macrophage / GlucoseOxidation_smooth_macrophage / FattyAcidOxidation_smooth_macrophage) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+#### macrophage_PScore vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+Glycolysis_macrophage <- cor_plot(pscore = macrophage_PScore,
+                            iscore = macrophage_ImmuneScore,
+                            tag = "Glycolysis")
+GlucoseOxidation_macrophage <- cor_plot(pscore = macrophage_PScore,
+                                  iscore = macrophage_ImmuneScore,
+                                  tag = "GlucoseOxidation")
+FattyAcidOxidation_macrophage <- cor_plot(pscore = macrophage_PScore,
+                                    iscore = macrophage_ImmuneScore,
+                                    tag = "FattyAcidOxidation")
+
+(Glycolysis_macrophage / GlucoseOxidation_macrophage / FattyAcidOxidation_macrophage) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+### version
+```{r}
+sessionInfo()
+```

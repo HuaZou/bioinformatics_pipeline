@@ -1,0 +1,291 @@
+---
+title: "Differential Gene Expression: Extended Volcano plot"
+date: "Created: 2021-03-22 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## Introduction
+
+To illuminate the Differential Expressed Genes with parameters: |log2FC| > 1 and P.value < 0.05 among different groups, we used the following plots: The **extended volcano plot** deciphers the consistent tendency between different diseases which compared to their controls.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data
+
+1. Human: the number of samples (n=197)
+
+  * NC:  69
+  
+  * DCM: 63
+  
+  * ICM: 65
+
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+  
+  * HF: 25
+  
+```{r}
+hsp_DCM <- read.csv("../../Result/Differential/final/Hsp_DCM_NC_Diffgene.csv")
+hsp_ICM <- read.csv("../../Result/Differential/final/Hsp_ICM_NC_Diffgene.csv")
+
+mus_TAC <- read.csv("../../Result/Differential/final/Mus_TAC_NC_Diffgene.csv")
+mus_HF <- read.csv("../../Result/Differential/final/Mus_HF_NC_Diffgene.csv")
+```
+
+
+### Differential gene expression 
+
+* log2FoldChange: 1
+
+* Adjust Pvalue: 0.05
+
+* Plot cutoff: log2FoldChange either 2 or 4
+
+```{r}
+extended_volcano <- function(x=hsp_DCM, 
+                             y=hsp_ICM,
+                             pval=0.05,
+                             fc=1,
+                             fc2=2,
+                             group_name=c("DCM", "ICM"),
+                             axis_len=6){
+  
+  # x=hsp_DCM
+  # y=hsp_ICM
+  # pval=0.05
+  # fc=1
+  # fc2=2
+  # group_name=c("DCM", "ICM")
+  # axis_len=6
+  
+  overlap_gene <- union(x$GeneID, y$GeneID)
+  dat_x <- x %>% filter(GeneID%in%overlap_gene)
+  dat_y <- y %>% filter(GeneID%in%overlap_gene)
+  
+  # the Differential Genes 
+  dat_x_signif <- subset(dat_x, adj.P.Val < pval & abs(logFC) > fc)
+  dat_y_signif <- subset(dat_y, adj.P.Val < pval & abs(logFC) > fc)
+  
+  # enriched in NC and Disease in both  
+  common_signif <- intersect(dat_x_signif$GeneID, dat_y_signif$GeneID)
+  
+  # enriched in NC and Disease in each
+  dat_x_sig_only <- setdiff(dat_x_signif$GeneID, common_signif)
+  dat_y_sig_only <- setdiff(dat_y_signif$GeneID, common_signif)
+  non_signif <- setdiff(overlap_gene, c(common_signif, dat_x_sig_only, dat_y_sig_only))
+  
+  
+  gene_type_name <- c(paste(group_name, collapse = "/"),
+                      paste(group_name[1], "only"),
+                      paste(group_name[2], "only"),
+                      "Nonsignif")
+  
+  gene_type_df <- rbind(data.frame(GeneID=common_signif, group=gene_type_name[1]),
+                        data.frame(GeneID=dat_x_sig_only, group=gene_type_name[2]),
+                        data.frame(GeneID=dat_y_sig_only, group=gene_type_name[3]),
+                        data.frame(GeneID=non_signif, group=gene_type_name[4]))
+  mdat <- inner_join(dat_x %>% dplyr::select(GeneID, logFC) %>% dplyr::rename(xvalue=logFC),
+                     dat_y %>% dplyr::select(GeneID, logFC) %>% dplyr::rename(yvalue=logFC),
+                     by = "GeneID") %>%
+    inner_join(gene_type_df, by="GeneID") %>%
+    mutate(group=factor(group, levels = rev(gene_type_name)))
+  
+  print(table(mdat$group))
+  
+  common_signif_gene <- mdat %>% filter(GeneID%in%common_signif)
+  
+  common_signif_gene <- mdat %>% filter(GeneID%in%common_signif) %>%
+    mutate(GeneID_v2=ifelse(abs(xvalue) > fc2 | abs(yvalue) > fc2, GeneID, NA))
+  
+  common_signif_gene_v2 <- na.omit(common_signif_gene)
+  print(table(common_signif_gene_v2$group))
+
+  require(magrittr)
+  # constants
+  axis_begin  <- -axis_len
+  axis_end    <- axis_len
+  total_ticks <- 8
+  
+  # point to plot
+  my_point <- data.frame(x=1, y=1)
+  # chart junk data
+  tick_frame <- data.frame(ticks = seq(axis_begin, axis_end, by=2), zero=0) %>%
+    subset(ticks != 0)
+  tick_frame <- data.frame(ticks = seq(axis_begin, axis_end, by=2), zero=0) %>%
+    subset(ticks != 0)
+  lab_frame <- data.frame(lab = seq(axis_begin, axis_end, 2), zero = 0) %>%
+    subset(lab != 0)
+  tick_sz <- (tail(lab_frame$lab, 1) -  lab_frame$lab[1]) / 128
+  
+  x_title <- paste(group_name[1], "vs NC")
+  y_title <- paste(group_name[2], "vs NC")
+  
+  pl <- ggplot(mdat)+
+    geom_segment(x = 0, xend = 0, 
+                 y = lab_frame$lab[1], yend = tail(lab_frame$lab, 1),
+                 size = 0.5) +
+    geom_segment(y = 0, yend = 0, 
+                 x = lab_frame$lab[1], xend = tail(lab_frame$lab, 1),
+                 size = 0.5) +
+    geom_segment(data = tick_frame, 
+                 aes(x = ticks, xend = ticks, 
+                     y = zero, yend = zero + tick_sz)) +
+    geom_segment(data = tick_frame, 
+                 aes(x = zero, xend = zero + tick_sz, 
+                     y = ticks, yend = ticks)) + 
+    geom_text(data=lab_frame, aes(x=lab, y=zero, label=lab),
+              family = 'Times', vjust=1.5) +
+    geom_text(data=lab_frame, aes(x=zero, y=lab, label=lab),
+              family = 'Times', hjust=1.5) +
+    annotate("text", x = 5, y = -.7, color = "black", size=3, 
+             label = paste0("log2(", x_title, ")"))+
+    annotate("text", x = -.7, y = 5, color = "black", size=3, angle=90, 
+             label = paste0("log2(", y_title, ")"))+
+    geom_point(aes(x = xvalue, y = yvalue, color=group), size = 2)+
+    geom_text_repel(data = common_signif_gene,  
+                    aes(x=xvalue, y=yvalue, label = GeneID_v2),
+                    size = 3,
+                    max.overlaps = getOption("ggrepel.max.overlaps", default = 80),
+                    segment.linetype = 1,
+                    segment.curvature = -1e-20,
+                    box.padding = unit(0.35, "lines"),
+                    point.padding = unit(0.3, "lines"),
+                    arrow = arrow(length = unit(0.005, "npc")),
+                    # color = "white",     # text color
+                    # bg.color = "grey30", # shadow color
+                    bg.r = 0.15)+
+    scale_color_manual(values = c("#A6A6A6", "#7BBDE0", "#B67FD0", "#FDC361"))+
+    guides(color=guide_legend(title = NULL, keywidth=.9, keyheight=.9, linetype=2))+
+    theme_void()+
+    theme(panel.grid = element_blank(),
+          text = element_text(size = 8, color = "black", family="serif"),      
+          legend.text=element_text(size=11, color = "black"),
+          legend.position = c(.7, .2),
+          legend.justification = c(0, 0),
+          legend.background = element_rect(linetype=2, color = "black", fill="white"))
+  
+  return(pl)
+}
+```
+
+
+### Human: DCM vs ICM 
+
+```{r, fig.width=8, fig.height=8}
+DCM_ICM_pl <- extended_volcano(x=hsp_DCM, 
+                               y=hsp_ICM,
+                               pval=0.05,
+                               fc=1,
+                               fc2=2,
+                               group_name=hsp.grp[c(2, 4)], 
+                               axis_len=6)
+
+DCM_ICM_pl
+ggsave(filename = "../../Result/Figures/version_210322/Fig1C.pdf", DCM_ICM_pl, width = 8, height = 8)
+```
+
+
+### Mouse : TAC vs HF
+```{r, fig.width=8, fig.height=8}
+TAC_HF_pl <- extended_volcano(x=mus_TAC, 
+                              y=mus_HF,
+                              pval=0.05,
+                              fc=1,
+                              fc2=2,
+                              group_name=mus.grp[c(2, 4)], 
+                              axis_len=6)
+
+TAC_HF_pl
+ggsave(filename = "../../Result/Figures/version_210322/Fig1E.pdf", TAC_HF_pl, width = 8, height = 8)
+```
+
+
+### Human vs Mouse 
+
+* DCM vs TAC 
+```{r, fig.width=8, fig.height=8}
+DCM_TAC_pl <- extended_volcano(x=hsp_DCM, 
+                               y=mus_TAC,
+                               pval=0.05,
+                               fc=1,
+                               fc2=2,
+                               group_name=c("DCM", "TAC"), 
+                               axis_len=6)
+
+DCM_TAC_pl
+ggsave(filename = "../../Result/Figures/version_210322/SFig3A.pdf", DCM_TAC_pl, width = 8, height = 8)
+```
+
+* DCM vs HF
+```{r, fig.width=8, fig.height=8}
+DCM_HF_pl <- extended_volcano(x=hsp_DCM, 
+                               y=mus_HF,
+                               pval=0.05,
+                               fc=1,
+                               fc2=2,
+                               group_name=c("DCM", "HF"), 
+                               axis_len=6)
+
+DCM_HF_pl
+ggsave(filename = "../../Result/Figures/version_210322/SFig3B.pdf", DCM_HF_pl, width = 8, height = 8)
+```
+
+* ICM vs TAC 
+```{r, fig.width=8, fig.height=8}
+ICM_TAC_pl <- extended_volcano(x=hsp_ICM, 
+                               y=mus_TAC,
+                               pval=0.05,
+                               fc=1,
+                               fc2=2,
+                               group_name=c("ICM", "TAC"), 
+                               axis_len=6)
+
+ICM_TAC_pl
+ggsave(filename = "../../Result/Figures/version_210322/SFig3C.pdf", ICM_TAC_pl, width = 8, height = 8)
+```
+
+* ICM vs HF
+```{r, fig.width=8, fig.height=8}
+ICM_HF_pl <- extended_volcano(x=hsp_ICM, 
+                               y=mus_HF,
+                               pval=0.05,
+                               fc=1,
+                               fc2=2,
+                               group_name=c("ICM", "HF"), 
+                               axis_len=6)
+
+ICM_HF_pl
+ggsave(filename = "../../Result/Figures/version_210322/SFig3D.pdf", ICM_HF_pl, width = 8, height = 8)
+```
+
+
+### Systemic information
+```{r}
+sessionInfo()
+```

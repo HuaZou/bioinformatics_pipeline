@@ -20,117 +20,63 @@ library(ggplot2)
 ```{r}
 phen <- read.csv("../../Result/phenotype/phenotype_20200111.csv")
 sp.prf <- fread("../../Result/profile/final_species_trim.tsv")
-gs.prf <- fread("../../Result/profile/final_genus_trim.tsv")
-pm.prf <- fread("../../Result/profile/final_phylum_trim.tsv")
 ```
 
 
 ### Function
 ```{r}
-Permanova_fun <- function(profile  = sp.prf, 
-                          metadata = phen, 
-                          adjust   = F){
-
+Maaslin2_fun <- function(metadata=phen,
+                         profile=sp.prf,
+                         outdir="Masslin2_species"){
+  # metadata=phen
   # profile=sp.prf
-  # metadata=phen 
-  # adjust=F  
-
-  sid <- intersect(metadata$SampleID, colnames(profile))
-  phe <- metadata %>% filter(SampleID%in%sid)
-  prof <- profile %>% column_to_rownames("V1") %>% 
-            select(sid) %>%
-            t() %>% data.frame()
+  # outdir="Masslin2_species"
   
-  if(adjust){
-    per <- apply(phe %>% select(-one_of("SampleID", "Sex", "Age")), 2, function(x, prof){
-        dat <- data.frame(value = x, Sex=phe$Sex, Age=phe$Age, prof) %>% na.omit()
-        df <- dat %>% dplyr::select(-c("Age", "Sex"))
-        datphe <- df$value 
-        if (length(datphe) == 0 | length(unique(datphe)) == 1) {
-          res <- c(length(datphe), rep(NA, 6))
-        }else{
-          if (length(unique(datphe)) < 6) {
-            datphe <- as.factor(datphe)
-          } 
-            datprf <- df[, -1, F] 
-            dis <- vegan::vegdist(datprf, method = "bray")
-            set.seed(123)
-            dat.tmp <- data.frame(group_col=datphe, Sex=dat$Sex, Age=dat$Age)
-            ad <- vegan::adonis(dis ~ group_col+Sex+Age, data = dat.tmp, permutations = 1000)
-            tmp <- as.data.frame(ad$aov.tab) %>% slice(1)
-            res <- c(length(datphe), as.numeric(tmp[, c(1:6)]))
-          }
-        return(res)
-      }, prof) %>% t() %>% data.frame()    
-  }else{
-    per <- apply(phe %>% select(-one_of("SampleID")), 2, function(x, prof){
-        dat <- data.frame(value = x, prof) %>% na.omit()
-        datphe <- dat$value  
-        if (length(datphe) == 0 | length(unique(datphe)) == 1) {
-          res <- c(length(datphe), rep(NA, 6))
-        }else{
-          if (length(unique(datphe)) < 6) {
-            datphe <- as.factor(datphe)
-          } 
-            datprf <- dat[, -1, F] 
-            dis <- vegan::vegdist(datprf, method = "bray")
-            set.seed(123)
-            ad <- vegan::adonis(dis ~ datphe, permutations = 1000)
-            tmp <- as.data.frame(ad$aov.tab) %>% slice(1)
-            res <- c(length(datphe), as.numeric(tmp[, c(1:6)]))
-          }
-        return(res)
-      }, prof) %>% t() %>% data.frame()    
-  }
+  sid <- intersect(metadata$SampleID, colnames(profile))
 
-    
-  colnames(per) <- c("SumsOfSample", "Df", "SumsOfSqs", 
-                       "MeanSqs", "F.Model", "R2", "Pr(>F)")
-  per$FDR <- p.adjust(per$`Pr(>F)`, method = "BH")
-  return(per)
-}
-```
-
-
-### species
-```{r}
-dir <- "../../Result/permanova"
-if(!dir.exists(dir)){
-  dir.create(dir)
+  phe <- metadata %>% filter(SampleID%in%sid) %>%
+    droplevels()   
+  
+  prf <- profile %>% column_to_rownames("V1") %>%
+    dplyr::select(as.character(phe$SampleID)) %>%
+    rownames_to_column("Type") %>%
+    filter(apply(select(., -one_of("Type")), 1, function(x){sum(x>0)/length(x)}) > 0.2) %>%
+    column_to_rownames("Type")  %>% 
+    t() %>% data.frame()
+  
+  # merge data by sampleID
+  mdat <- left_join(phe, 
+                   prf %>% rownames_to_column("SampleID"), 
+                   by="SampleID") %>%
+    column_to_rownames("SampleID")
+  
+  # choose mdat 
+  input_data <- mdat[, c(ncol(phe):ncol(mdat))] 
+  input_metadata <- mdat[, c(1:(ncol(phe)-1))]  
+  
+  fit_data <- Maaslin2(
+    input_data, 
+    input_metadata, 
+    outdir,
+    min_abundance = 1e-05,
+    min_prevalence = 0.2,    
+    transform = "AST",
+    fixed_effects = c("Age"),
+    random_effects = NULL,
+    normalization = "TSS",
+    analysis_method = "LM",
+    max_significance = 0.25,
+    correction = "BH",
+    standardize = TRUE,
+    cores = 1,
+    plot_heatmap = TRUE,
+    plot_scatter = TRUE,
+    heatmap_first_n = 50)
 }
 
-sp.per <- Permanova_fun(profile = sp.prf)
-DT::datatable(sp.per)
-sp.path <- paste(dir, "species_permanova.csv", sep = "/")
-write.csv(sp.per, file = sp.path, row.names = T)
-```
-
-
-### genus
-```{r}
-dir <- "../../Result/permanova"
-if(!dir.exists(dir)){
-  dir.create(dir)
-}
-
-gs.per <- Permanova_fun(profile = gs.prf)
-DT::datatable(gs.per)
-gs.path <- paste(dir, "genus_permanova.csv", sep = "/")
-write.csv(gs.per, file = gs.path, row.names = T)
-```
-
-
-### phylum
-```{r}
-dir <- "../../Result/permanova"
-if(!dir.exists(dir)){
-  dir.create(dir)
-}
-
-pm.per <- Permanova_fun(profile = pm.prf)
-DT::datatable(pm.per)
-pm.path <- paste(dir, "phylum_permanova.csv", sep = "/")
-write.csv(pm.per, file = pm.path, row.names = T)
+Maaslin2_fun(metadata=phen,
+             profile=sp.prf,
+             outdir="Masslin2_species")
 ```
 
 

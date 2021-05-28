@@ -1,0 +1,210 @@
+---
+title: "Enriched pathway analysis: based on cluterProfiler and enrichplot"
+date: "Created: 2021-02-03 Updated: `r Sys.Date()`"
+author: 
+  - name: "Hua Zou"
+    email: "zouhua1@outlook.com"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## Introduction
+
+Performing Enriched pathway analysis via **clusterProfiler** and **enrichplot** package based on the DESeq2 results
+
+* *clusterProfiler* calculates the enrichment score
+
+* *enrichplot* displays the enrichment result
+
+Two approaches for enrichment analysis:
+
+* Over Representation Analysis: the up- or down-regulated DEGs 
+
+* Gene Set Enrichment Analysis: All the ranked DEGs
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(data.table)
+library(clusterProfiler)
+library(enrichplot)
+library(patchwork)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data 
+
+* gene Expression DESeq2 object
+```{r}
+DCM_dif <- fread("../../Result/Differential/Hsp_DCM_NC_Diffgene.csv")
+ICM_dif <- fread("../../Result/Differential/Hsp_ICM_NC_Diffgene.csv")
+HF_dif <- fread("../../Result/Differential/Mus_HF_NC_Diffgene.csv")
+TAC_dif <- fread("../../Result/Differential/Mus_TAC_NC_Diffgene.csv")
+```
+
+
+### Curation Function 
+
+* Over Representation Analysis: the DEgenes vectors (up or down)
+
+Questions: Whether the genes of Mouse are suitable for this analysis
+```{r}
+# ORA 
+get_ORA <- function(dataset=DCM_dif,
+                    group=hsp.grp[2]){
+  
+  # dataset=DCM_dif
+  # group=hsp.grp[2]
+  
+  # extract DEGs
+  dat <- dataset %>% 
+    dplyr::rename(SYMBOL=GeneID, log2FoldChange=logFC) %>%
+    filter(Enrichment%in%group) %>%
+    distinct() %>%
+    arrange(log2FoldChange)
+  
+  # transform geneid
+  require(org.Hs.eg.db)
+  symbol2entrz <- AnnotationDbi::select(org.Hs.eg.db,
+                                      key=dat$SYMBOL, 
+                                      columns="ENTREZID",
+                                      keytype="SYMBOL")
+  symbol2entrz <- as_tibble(symbol2entrz)
+
+  dat_v2 <- inner_join(symbol2entrz, dat, by ="SYMBOL") %>%
+    dplyr::select(ENTREZID, log2FoldChange) %>%
+    na.omit() %>% 
+    distinct() %>% 
+    group_by(ENTREZID) %>% 
+    summarize(log2FoldChange=mean(log2FoldChange)) %>%
+    ungroup() %>%
+    arrange(desc(log2FoldChange))
+  
+  geneList <- tibble::deframe(dat_v2)  
+  es_res <- enrichGO(gene          = names(geneList),
+                     OrgDb         = org.Hs.eg.db,
+                     keyType       = "ENTREZID",
+                     ont           = "CC",
+                     pAdjustMethod = "BH",
+                     pvalueCutoff  = 0.01,
+                     qvalueCutoff  = 0.05)
+  
+  res <- list(glist=geneList, es=es_res) 
+  
+  return(res)
+}
+
+plot_Escore <- function(dataset=GSEA_kegg,
+                        type="barplot",
+                        number=10){
+  # dataset=GSEA_kegg
+  # type="barplot"
+  # number=10
+  
+  my_theme <- theme(axis.title = element_text(face = 'bold',color = 'black',size = 14),
+                  axis.text = element_text(color = 'black',size = 10),
+                  text = element_text(size = 8, color = "black", family="serif"),
+                  legend.position = 'right',
+                  legend.key.height = unit(0.6,'cm'),
+                  legend.text = element_text(face = "bold", color = 'black',size = 10),
+                  strip.text = element_text(face = "bold", size = 14))
+  
+  edox <- setReadable(dataset$es, 'org.Hs.eg.db', 'ENTREZID')
+  
+  if(type == "barplot"){
+    pl <- barplot(edox, showCategory = number)+
+      my_theme
+  }else if(type == "dotplot"){
+    pl <- enrichplot::dotplot(edox, showCategory=number)+
+      my_theme
+  }else if(type == "network"){
+    pl <- enrichplot::cnetplot(edox, categorySize="pvalue", foldChange=dataset$glist, showCategory = 3)+
+      my_theme
+  }else if(type == "heatmap"){
+    pl <- enrichplot::heatplot(edox, foldChange=dataset$glist, showCategory = number)+
+      my_theme
+  }else if(type == "enrichment"){
+    pl <- enrichplot::emapplot(dataset$es, pie_scale=1.5, layout="kk", showCategory = number)+
+      my_theme
+  }else if(type == "UpSet"){
+    require(ggupset)
+    pl <- enrichplot::upsetplot(dataset$es, n=number)+
+      my_theme
+  }else if(type == "pubmed"){                    
+    terms <- dataset$es$Description[1:number]
+    pl <- enrichplot::pmcplot(terms, 2010:2021, proportion = T)+
+      my_theme
+  }
+  
+  return(pl)
+}
+```
+
+
+### Over Representation Analysis
+
+* Calculate the Enrichment results: DCM_NC
+```{r}
+DEGs_ORA_GO_DCM_NC <- get_ORA(dataset = DCM_dif, group = hsp.grp[c(1:2)])
+DEGs_ORA_GO_NC <- get_ORA(dataset = DCM_dif, group = hsp.grp[1])
+DEGs_ORA_GO_DCM <- get_ORA(dataset = DCM_dif, group = hsp.grp[2])
+
+save(DEGs_ORA_GO_DCM_NC, DEGs_ORA_GO_NC, DEGs_ORA_GO_DCM,
+     file = "../../Result/Enrichment/DEGs_ORA_GO_DCM_NC.RData")
+```
+
+
+* Visualization : GO barplot
+```{r, fig.width=16, fig.height=8}
+DEGs_ORA_GO_barplot_DCM_NC <- plot_Escore(dataset = DEGs_ORA_GO_DCM_NC, number = 10, type = "barplot")
+DEGs_ORA_GO_barplot_DCM <- plot_Escore(dataset = DEGs_ORA_GO_DCM, number = 10, type = "barplot")
+
+(DEGs_ORA_GO_barplot_DCM_NC | DEGs_ORA_GO_barplot_DCM)+
+  plot_layout(guides = 'collect')+
+  plot_annotation(tag_levels = "A")
+```
+
+* Calculate the Enrichment results: ICM_NC
+```{r}
+DEGs_ORA_GO_ICM_NC <- get_ORA(dataset = ICM_dif, group = hsp.grp[c(1, 4)])
+DEGs_ORA_GO_ICM <- get_ORA(dataset = ICM_dif, group = hsp.grp[4])
+
+save(DEGs_ORA_GO_ICM_NC, DEGs_ORA_GO_ICM,
+     file = "../../Result/Enrichment/DEGs_ORA_GO_ICM_NC.RData")
+```
+
+
+* Visualization : GO barplot
+```{r, fig.width=16, fig.height=8}
+DEGs_ORA_GO_barplot_ICM_NC <- plot_Escore(dataset = DEGs_ORA_GO_ICM_NC, number = 10, type = "barplot")
+DEGs_ORA_GO_barplot_ICM <- plot_Escore(dataset = DEGs_ORA_GO_ICM, number = 10, type = "barplot")
+
+(DEGs_ORA_GO_barplot_ICM_NC | DEGs_ORA_GO_barplot_ICM)+
+  plot_layout(guides = 'collect')+
+  plot_annotation(tag_levels = "A")
+```
+
+### version
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [Functional Enrichment Analysis Methods](http://yulab-smu.top/clusterProfiler-book/chapter2.html) 
+
+2. [Visualization of Functional Enrichment Result](http://yulab-smu.top/clusterProfiler-book/chapter12.html#enrichment-map)

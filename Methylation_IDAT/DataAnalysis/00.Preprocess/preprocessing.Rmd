@@ -1,0 +1,286 @@
+---
+title: "Data preprocessing"
+date: "Created: 2021-04-26 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+### Introduction
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+
+# rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+```
+
+
+### obtain the gene annotation file
+```{r}
+if(0){
+library(biomaRt)
+library(curl)
+
+get_description <- function(genelist=hsp_genelist,
+                            kind="human"){
+  
+  # genelist=hsp_genelist
+  # kind="human"
+  
+  filename <- paste0("../../Result/GeneID/", kind, "_mart.RData")
+  
+  if(file.exists(filename)){
+    load(filename)
+  }else{
+    if(kind == "mouse"){
+      mouse_mart <- useMart(host="www.ensembl.org",
+                            biomart="ENSEMBL_MART_ENSEMBL",
+                            dataset="mmusculus_gene_ensembl")
+      mouse_gene_all <- getBM(attributes=c("ensembl_gene_id", 
+                                         "entrezgene_id",
+                                         "external_gene_name", 
+                                         "ensembl_transcript_id", 
+                                         "ensembl_transcript_id_version",
+                                         "transcript_biotype", 
+                                         "description"),
+                            filters="ensembl_gene_id",
+                            values = genelist$Geneid,
+                            mart=mouse_mart)
+    save(mouse_mart, mouse_gene_all, file = filename)
+    write.table(mouse_gene_all, "../../Result/GeneID/mouse_gene_all.tsv", 
+              quote = F, sep = "\t", row.names = F)
+    }else{
+      human_mart <- useMart(host="www.ensembl.org", 
+                       biomart="ENSEMBL_MART_ENSEMBL", 
+                       dataset = "hsapiens_gene_ensembl")
+      human_gene_all <- getBM(attributes=c("ensembl_gene_id", 
+                                           "entrezgene_id",
+                                           "external_gene_name", 
+                                           "ensembl_transcript_id", 
+                                           "ensembl_transcript_id_version",
+                                           "transcript_biotype", 
+                                           "description"),
+                              filters = "ensembl_gene_id",
+                              values = genelist$Geneid,
+                              mart = human_mart)
+      save(human_mart, human_gene_all, file = filename)
+      write.table(human_gene_all, "../../Result/GeneID/human_gene_all.tsv", 
+              quote = F, sep = "\t", row.names = F)
+    }
+  }
+}
+# run get gene symbol
+hsp_genelist <- fread("../../Result/GeneID/Homo_sapiens.GRCh38.101.genelength.tsv")
+get_description(genelist = hsp_genelist, kind = "human")
+}
+```
+
+
+### load data 
+```{r}
+phen <- read.csv("../../Result/phenotype/Pancreatic_tumor_merge_20210426.csv")
+geneExp <- fread("./RNASeq/stringtie_gene_counts.csv")
+methy <- fread("./Methylation/result/Matrix/NormalisedFilteredMTable.csv")
+
+human_gene <- fread("../../Result/GeneID/human_gene_all.tsv")
+```
+
+### Preprocess the gene expression matrix
+
+the following scripts comprise of several functions: filtering features, removing batch effects and visualizing  
+
+  1. the transcript_biotype of gene descripted *protein_coding* would be remained
+
+  2. the feature of occurrence less than 0.2
+  
+  3. the feature of total counts more than 10 
+  
+  4. the unique number of feature(Avoid the constant expression value per gene) 
+
+```{r}
+# filtering profile
+get_geneExpr <- function(x=phen, 
+                         y=geneExp,
+                         uniq=2, 
+                         occurrence=0.2,
+                         ncount=10){
+  
+  # x=phen
+  # y=geneExp
+  # occurrence=0.2
+  # uniq=2
+  # ncount=10
+  
+  y$gene_id <- gsub("\\|\\S+", "", y$gene_id)
+  gene_list <- human_gene %>% filter(transcript_biotype == "protein_coding") 
+
+  gene_sid <- intersect(gene_list$ensembl_gene_id, y$gene_id)
+  gene_list_filter <- gene_list %>% filter(ensembl_gene_id %in% gene_sid)
+  prf <- y %>% filter(gene_id%in%as.character(gene_sid)) %>% 
+    column_to_rownames("gene_id")
+  
+  sid <- intersect(x$SampleID, colnames(prf))
+  
+  # phenotype
+  phe <- x %>% filter(SampleID%in%sid) %>% 
+    filter(Omics=="RNA") %>%
+    column_to_rownames("SampleID") 
+  
+  # profile by occurrence
+  prf_occ <- prf %>% rownames_to_column("tmp") %>% 
+    filter(apply(dplyr::select(., -one_of("tmp")), 1, function(x) {
+            sum(x != 0)/length(x)}) > occurrence) %>%
+    dplyr::select(c(tmp, rownames(phe))) %>%
+    column_to_rownames("tmp")
+  
+  
+  # convert ensemblid into gene symbol
+  # filter profile by unique
+  prf_uniq_number <- apply(prf_occ, 1, function(x){length(unique(x[x > 0]))}) %>% 
+    data.frame() %>% setNames("number")
+  remain_genes <- prf_uniq_number %>% filter(number > uniq)
+  
+  prf_count <- prf_occ[rowSums(prf_occ) > ncount, ]
+  prf_final <- prf_count[rownames(prf_count)%in%rownames(remain_genes), ]
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prf_final)){ 
+    if (!(colnames(prf_final)[i] == rownames(phe)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  # convert ensembid into gene symbol
+  prf_symbol <- inner_join(prf_final %>% rownames_to_column("ensembleid"), 
+                           gene_list_filter %>% dplyr::select(ensembl_gene_id, external_gene_name),
+                           by = c("ensembleid"="ensembl_gene_id")) 
+  idx <- grep("ensembleid|external_gene_name", colnames(prf_symbol))
+  # filter features according gene symbol
+  prf_symbol$median <- apply(prf_symbol[, -idx], 1, median)
+  prf_symbol <- with(prf_symbol, prf_symbol[order(external_gene_name, median, decreasing = T), ]) 
+  prf_deduplicated <- prf_symbol[!duplicated(prf_symbol$external_gene_name), ] %>% dplyr::select(-median) 
+    
+  # filter features according ensemble id
+  prf_deduplicated$median <- apply(prf_deduplicated[, -idx], 1, median)
+  prf_deduplicated_v2 <- with(prf_deduplicated, prf_deduplicated[order(ensembleid, median, decreasing = T), ])
+  prf_deduplicated_v2 <- prf_deduplicated_v2[!duplicated(prf_deduplicated_v2$ensembleid), ] %>%
+      dplyr::select(-median)
+  rownames(prf_deduplicated_v2) <- NULL
+    
+  # return result: gene symbol
+  prof_res <- prf_deduplicated_v2  %>% 
+      dplyr::select(ensembleid, external_gene_name, everything()) %>%
+      dplyr::rename(gene_symbol=external_gene_name) %>%
+      dplyr::select(-ensembleid) %>%
+      column_to_rownames("gene_symbol")    
+
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prof_res)){ 
+    if (!(colnames(prof_res)[i] == rownames(phe)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }  
+    
+  require(convert)
+  exprs <- as.matrix(prof_res)
+  adf <-  new("AnnotatedDataFrame", data=phe)
+  experimentData <- new("MIAME",
+        name="ShuiLin Liao", lab="Dong gdl Lab",
+        contact="dong_ming@grmh-gdl.cn",
+        title="Pancreatic tumor Experiment",
+        abstract="The gene ExpressionSet",
+        url="www.grmh-gdl.cn",
+        other=list(notes="Created from text files"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  
+  return(expressionSet)
+}
+
+# visualization
+pca_fun <- function(expers_set=ExpreSet){
+  
+  # expers_set=ExpreSet
+  
+  pheno <- pData(expers_set)
+  edata <- exprs(expers_set)
+  pca <- prcomp(t(edata), scale. = TRUE, center = T)
+  score <- inner_join(pca$x %>% data.frame() %>% 
+                        rownames_to_column("SampleID")  %>%  
+                        dplyr::select(c(1:3)) , 
+                        pheno %>% rownames_to_column("SampleID"),
+                      by = "SampleID")
+  colors <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A",
+             "#993116", "#6798CE", "#146666", "#CE9924", "#6D659D",
+             "#9F9B27", "#C80b8A", "#2C3A89")
+  pl <- ggplot(score, aes(x=PC1, y=PC2))+
+          geom_point(aes(color=Type), size=3.5)+
+          geom_line(aes(group=PID))+
+          guides(color=guide_legend(title=NULL,keywidth=.7, keyheight=.7))+
+          geom_hline(yintercept = 0, linetype = 2)+
+          geom_vline(xintercept = 0, linetype = 2)+
+          scale_color_manual(values = colors)+
+          theme_bw()+
+          theme(axis.title = element_text(size=10, color="black", face="bold"),
+                axis.text = element_text(size=9, color="black"),
+                text = element_text(size=8, color="black", family="serif"),
+                strip.text = element_text(size=9, color="black", face="bold", family="serif"), 
+                panel.grid = element_blank(),
+                legend.text = element_text(size=11, color = "black", family="serif"),
+                legend.background = element_rect(color = "black", fill="white"),
+                legend.position = "bottom")
+  return(pl)  
+}
+```
+
+
+```{r, fig.width=8, fig.height=6}
+ExpreSet <- get_geneExpr(y = geneExp)
+if(!dir.exists("../../Result/profile")){
+  dir.create("../../Result/profile")
+}
+saveRDS(ExpreSet, "../../Result/profile/GeneExprSet_filtered.RDS", compress = TRUE)
+
+pca_fun(expers_set = ExpreSet)
+```
+
+### DNA methylation
+
+* Methylated probes matrix, also known as CpG sites;
+
+* Methylated regions, which composing several proximal CpGs;
+
+
+```{r}
+# CpG site annotation
+library(IlluminaHumanMethylationEPICmanifest)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+annEPIC <- getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+
+annEPIC_sub <- annEPIC[match(rownames(methy %>% column_to_rownames("V1")), annEPIC$Name), ]
+
+if(!dir.exists("../../Result/GeneID/")){
+  dir.create("../../Result/GeneID/")
+}
+saveRDS(annEPIC_sub, "../../Result/GeneID/EPIC_annotation.RDS", compress = TRUE)
+```
+
+
+
+### systemic information
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [A cross-package Bioconductor workflow for analysing methylation array data](https://master.bioconductor.org/packages/release/workflows/vignettes/methylationArrayAnalysis/inst/doc/methylationArrayAnalysis.html)

@@ -1,0 +1,226 @@
+---
+title: "Metabolism and immune score relationship"
+date: "Created: 2021-01-25 modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(patchwork)
+library(data.table)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data 
+```{r}
+# pathway score
+hsp_Pscore <- fread("../../Result/Pathway/Score/hsp_ssgsea.csv")
+mus_Pscore_all <- fread("../../Result/Pathway/Score/mus_ssgsea_all.csv")
+mus_Pscore_pub <- fread("../../Result/Pathway/Score/mus_ssgsea_pub.csv")
+mus_Pscore_self <- fread("../../Result/Pathway/Score/mus_ssgsea_self.csv")
+
+
+# immune score
+hsp_Iscore <- fread("../../Result/Immune_score/Score/hsp_ImmuneScore.csv")
+mus_Iscore_all <- fread("../../Result/Immune_score/Score/mus_all_ImmuneScore.csv")
+mus_Iscore_pub <- fread("../../Result/Immune_score/Score/mus_pub_ImmuneScore.csv")
+mus_Iscore_self <- fread("../../Result/Immune_score/Score/mus_self_ImmuneScore.csv")
+
+
+# phenotype 
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20210118.csv")
+```
+
+
+### curate data 
+```{r}
+cor_plot <- function(pscore = hsp_Pscore,
+                     iscore = hsp_Iscore,
+                     tag = "Glycolysis",
+                     group_name=c("NC", "DCM", "ICM")){
+  
+  # pscore = hsp_Pscore
+  # iscore = hsp_Iscore
+  # tag <- "Glycolysis"
+  # group_name=c("NC", "DCM", "ICM")
+
+  mdat <- subset(phen, select = c(SampleID, Group)) %>% 
+    inner_join(
+            pscore %>% tidyr::gather(key="pathway", value="PathwayScore", 
+                        -c("SampleID")) %>%
+              inner_join(iscore %>% column_to_rownames("V1") %>%
+                       dplyr::select(ImmuneScore) %>%
+                       rownames_to_column("SampleID"), 
+                     by="SampleID"), 
+            by = "SampleID"
+            )
+  
+  
+  xlab <- paste(tag, "activity score")
+  ylab <- paste("Immune activity score")
+  mdat_cln <- mdat %>% filter(pathway%in%tag) %>%
+    filter(Group%in%group_name) %>%
+    mutate(Group=factor(as.character(Group), levels = group_name)) 
+  
+
+  # fit <- lm(formula = ImmuneScore ~ PathwayScore, data = mdat_cln)
+  # lm.lst <- list(a = as.numeric(format(coef(fit)[1], digits = 4)),
+  #             b = as.numeric(format(coef(fit)[2], digits = 4)),
+  #             r2 = format(summary(fit)$r.squared, digits = 4),
+  #             p = format(summary(fit)$coefficients[2,4], digits = 4))
+  # eq <- substitute(italic(y) == a + b %.% italic(x)~","~italic(R)^2~"="~r2~","~italic(P)~"="~p, lm.lst)
+  # lab <- substitute(~italic(R)^2~"="~r2~","~italic(P)~"="~p, lm.lst)
+  #   
+  # PScore <- with(mdat_cln, (max(PathwayScore)-min(PathwayScore))/2+min(PathwayScore))
+  # IScore <- with(mdat_cln, max(ImmuneScore)-(max(ImmuneScore)-min(ImmuneScore))/8)
+  #   
+  # dat_lab <- data.frame(PathwayScore=PScore,
+  #                      ImmuneScore=IScore,
+  #                      label=as.character(as.expression(lab)))
+  
+  
+  dat_lab <- c()
+  fr <- levels(mdat_cln$Group)
+  for(i in 1:length(fr)){
+    mdat_cln_fr <- mdat_cln %>% filter(Group%in%fr[i])
+    fit <- lm(formula = ImmuneScore ~ PathwayScore, data = mdat_cln_fr)
+    lm.lst <- list(a = as.numeric(format(coef(fit)[1], digits = 4)),
+              b = as.numeric(format(coef(fit)[2], digits = 4)),
+              r2 = format(summary(fit)$r.squared, digits = 4),
+              p = format(summary(fit)$coefficients[2,4], digits = 4))
+    eq <- substitute(italic(y) == a + b %.% italic(x)~","~italic(R)^2~"="~r2~","~italic(P)~"="~p, lm.lst)
+    lab <- substitute(~italic(R)^2~"="~r2~","~italic(P)~"="~p, lm.lst)
+    
+    PScore <- with(mdat_cln_fr, (max(PathwayScore)-min(PathwayScore))/2+min(PathwayScore))
+    IScore <- with(mdat_cln_fr, max(ImmuneScore)-(max(ImmuneScore)-min(ImmuneScore))/8)
+    
+    temp <- data.frame(PathwayScore=PScore,
+                       ImmuneScore=IScore,
+                       Group=fr[i],
+                       label=as.character(as.expression(lab)))
+    dat_lab <- rbind(dat_lab, temp)
+  }
+  
+    
+  pl <- ggplot(mdat_cln, aes(x=PathwayScore, y=ImmuneScore))+ 
+    geom_point()+
+    stat_smooth(method='lm', formula = y~x, color="red")+
+    geom_text(data=dat_lab, aes(x=PathwayScore, y=ImmuneScore, label = label),
+                size = 4, parse = TRUE, family="serif") +
+    labs(x=xlab, y=ylab)+
+    theme_bw()+
+    facet_wrap(~Group, scales = "free")+ 
+    theme(axis.title = element_text(face = 'bold',color = 'black',size = 10),
+          axis.text.y = element_text(color = 'black',size = 8),
+          axis.text.x = element_text(color = 'black',size = 8),
+          strip.text = element_text(size = 10, face = "bold"),
+          text = element_text(size = 8, color = "black", family="serif"))
+  
+  return(pl)  
+}
+```
+
+
+### Human
+```{r, fig.width=12, fig.height=9}
+hsp_Glycolysis <- cor_plot(pscore = hsp_Pscore,
+                           iscore = hsp_Iscore,
+                           tag = "Glycolysis",
+                           group_name=c("NC", "DCM", "ICM"))
+hsp_GlucoseOxidation <- cor_plot(pscore = hsp_Pscore,
+                                 iscore = hsp_Iscore,
+                                tag = "GlucoseOxidation",
+                                group_name=c("NC", "DCM", "ICM"))
+hsp_FattyAcidOxidation <- cor_plot(pscore = hsp_Pscore,
+                                    iscore = hsp_Iscore,
+                                    tag = "FattyAcidOxidation",
+                                   group_name=c("NC", "DCM", "ICM"))
+
+(hsp_Glycolysis / hsp_GlucoseOxidation / hsp_FattyAcidOxidation) +
+  plot_layout(ncol = 1)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+### Mouse all
+```{r, fig.width=12, fig.height=9}
+mus_Glycolysis_all <- cor_plot(pscore = mus_Pscore_all,
+                           iscore = mus_Iscore_all,
+                           tag = "Glycolysis",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+mus_GlucoseOxidation_all <- cor_plot(pscore = mus_Pscore_all,
+                                 iscore = mus_Iscore_all,
+                                tag = "GlucoseOxidation",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+mus_FattyAcidOxidation_all <- cor_plot(pscore = mus_Pscore_all,
+                                    iscore = mus_Iscore_all,
+                                    tag = "FattyAcidOxidation",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+
+(mus_Glycolysis_all / mus_GlucoseOxidation_all / mus_FattyAcidOxidation_all) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+### Mouse public 
+```{r, fig.width=12, fig.height=9}
+mus_Glycolysis_pub <- cor_plot(pscore = mus_Pscore_pub,
+                           iscore = mus_Iscore_pub,
+                           tag = "Glycolysis",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+mus_GlucoseOxidation_pub <- cor_plot(pscore = mus_Pscore_pub,
+                                 iscore = mus_Iscore_pub,
+                                tag = "GlucoseOxidation",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+mus_FattyAcidOxidation_pub <- cor_plot(pscore = mus_Pscore_pub,
+                                    iscore = mus_Iscore_pub,
+                                    tag = "FattyAcidOxidation",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+
+(mus_Glycolysis_pub / mus_GlucoseOxidation_pub / mus_FattyAcidOxidation_pub) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+### Mouse self
+```{r, fig.width=12, fig.height=9}
+mus_Glycolysis_self <- cor_plot(pscore = mus_Pscore_self,
+                           iscore = mus_Iscore_self,
+                           tag = "Glycolysis",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+mus_GlucoseOxidation_self <- cor_plot(pscore = mus_Pscore_self,
+                                 iscore = mus_Iscore_self,
+                                tag = "GlucoseOxidation",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+mus_FattyAcidOxidation_self <- cor_plot(pscore = mus_Pscore_self,
+                                    iscore = mus_Iscore_self,
+                                    tag = "FattyAcidOxidation",
+                           group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+
+(mus_Glycolysis_self / mus_GlucoseOxidation_self / mus_FattyAcidOxidation_self) +
+  plot_layout(ncol = 2)
+#ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

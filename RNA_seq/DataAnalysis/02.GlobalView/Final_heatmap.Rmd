@@ -1,0 +1,173 @@
+---
+title: "heatmap for all gene"
+date: "Created:2020-7-23 Modified: 2020-7-26"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+
+grp <- c("TAC", "TAC_NC", "HF", "HF_NC", "MI", "MI_NC", "STZT1D", "STZT1D_NC")
+grp.col <- c("#283891", "#EED3AC", "#C1272D", "#9DCEDC", "#ED1C24", "#9DCEDC", "#F89C31", "#B6B6BA")
+
+btc <- c("b1", "b2", "novo", "public")
+btc.col <- c("#EE2B2B", "#BCD74B", "#6DC06A", "#2D6BB4")
+```
+
+### load data 
+```{r}
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20200716.csv")
+
+STAR_prof <- fread("../../Result/Profile/STAR_filtered_TPM.tsv") %>%
+  column_to_rownames("V1")
+stringtie_prof <- fread("../../Result/Profile/stringtie_filtered_TPM.tsv") %>%
+  column_to_rownames("V1")
+
+kallisto_prof <- fread("../../Result/Profile/kallisto_filtered_TPM.tsv") %>%
+  column_to_rownames("V1")
+salmon_prof <- fread("../../Result/Profile/salmon_filtered_TPM.tsv") %>%
+  column_to_rownames("V1")
+```
+
+### expressionset function
+```{r}
+get_expr_Set <- function(x, y, ncount=10, occurrence=0.2){
+  # x <- phen
+  # y <- prof
+  
+  require(convert)
+  prf <- y[rowSums(y) > ncount, ]
+  sid <- intersect(x$SampleID_v2, colnames(y))
+  phe <- x %>% filter(SampleID_v2%in%sid) %>%
+    #arrange(desc(Group)) %>%
+    #arrange(factor(Group, levels = grp)) %>%
+    arrange(factor(Batch, levels = btc)) %>%
+    column_to_rownames("SampleID_v2") 
+  prf.cln <- prf %>% rownames_to_column("tmp") %>% 
+    filter(apply(dplyr::select(., -one_of("tmp")), 1, function(x) {
+            sum(x != 0)/length(x)}) > occurrence) %>%
+    dplyr::select(c(tmp, rownames(phe))) %>%
+    column_to_rownames("tmp")
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prf.cln)){ 
+    if (!(colnames(prf.cln)[i] == rownames(phe)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  exprs <- as.matrix(prf.cln)
+  adf <-  new("AnnotatedDataFrame", data=phe)
+  experimentData <- new("MIAME",
+        name="Jin Chao", lab="Gong gdl Lab",
+        contact="dong_ming@grmh-gdl.cn",
+        title="Heart-failure Experiment",
+        abstract="The gene ExpressionSet",
+        url="www.grmh-gdl.cn",
+        other=list(notes="Created from text files"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  
+  return(expressionSet)
+}
+
+STAR_expr_set <- get_expr_Set(phen, STAR_prof)
+stringtie_expr_set <- get_expr_Set(phen, stringtie_prof)
+kallisto_expr_set <- get_expr_Set(phen, kallisto_prof)
+salmon_expr_set <- get_expr_Set(phen, salmon_prof)
+```
+
+
+### pheatmap function
+```{r}
+heatFun <- function(expr_set){
+  
+  #expr_set=STAR_expr_set
+
+  dat <- exprs(expr_set) 
+  # Choose which column variables you want to annotate the columns by.
+  annotation_col <- data.frame(
+      Batch=factor(expr_set$Batch),
+      Group=factor(expr_set$Group),
+      row.names=colnames(expr_set)
+  )
+  
+  # ann_colors <- list(
+  #   Batch=c(b1 = btc.col[1], b2=btc.col[2], 
+  #           novo = btc.col[3]),
+  #   Group=c(TAC = grp.col[1], TAC_NC = grp.col[2], 
+  #           HF = grp.col[3], HF_NC = grp.col[4])
+  # )
+  
+  match_color <- function(grp_lab, btc_lab){
+  
+      grp_idx <- pmatch(grp_lab, grp)
+      btc_idx <- pmatch(btc_lab, btc)
+      
+      grp_lab_col <- grp.col[grp_idx]
+      btc_lab_col <- btc.col[btc_idx]
+      
+      return(list(Batch=btc_lab_col,
+                  Group=grp_lab_col))
+    } 
+  ann_colors <- match_color(unique(as.character(expr_set$Group)), 
+                         unique(as.character(expr_set$Batch)))
+ 
+  names(ann_colors$Group) <- unique(as.character(expr_set$Group))
+  names(ann_colors$Batch) <- unique(as.character(expr_set$Batch))
+  
+  require(pheatmap)
+  require(RColorBrewer)
+  pheatmap(mat = dat, 
+           color = colorRampPalette(c("#00FF00", "#000700", "#FF0000"))(100),
+           #color = colorRampPalette(brewer.pal(9, "YlOrBr"))(255),
+           scale = "row", # Scale genes to Z-score (how many standard deviations)
+           annotation_col = annotation_col, # Add multiple annotations to the samples
+           annotation_colors = ann_colors,  # Change the default colors of the annotations
+           cluster_row = TRUE, 
+           cluster_cols = FALSE,
+           fontsize = 15, # Make fonts smaller
+           cellwidth = 20, # Make the cells wider
+           #cellheight = 20, 
+           show_colnames = T,
+           show_rownames = F,
+           legend_breaks = sort(c(0,seq(-5,5,2))),
+           legend_labels = as.character(sort(c(0,seq(-5,5,2)))),
+           treeheight_row = 0,
+           margins = c(10, 8))
+}
+```
+
+
+### heatmap
+
+#### STAR 
+```{r, fig.width=15, fig.height=10}
+heatFun(STAR_expr_set)
+#ggsave("../../Result/PDF/STAR_filtered_TPM_heatmap.pdf", width = 16, height = 8, dpi = 300)
+```
+
+#### stringtie 
+```{r, fig.width=15, fig.height=10}
+heatFun(stringtie_expr_set)
+#ggsave("../../Result/PDF/stringtie_filtered_TPM_heatmap.pdf", width = 16, height = 8, dpi = 300)
+```
+
+#### kallisto
+```{r, fig.width=15, fig.height=10}
+heatFun(kallisto_expr_set)
+#ggsave("../../Result/PDF/kallisto_filtered_TPM_heatmap.pdf", width = 16, height = 8, dpi = 300)
+```
+
+#### salmon 
+```{r, fig.width=15, fig.height=10}
+heatFun(salmon_expr_set)
+#ggsave("../../Result/PDF/salmon_filtered_TPM_heatmap.pdf", width = 16, height = 8, dpi = 300)
+```

@@ -1,0 +1,227 @@
+---
+title: "Differential Gene Expression analysis"
+date: "Created: 2021-03-19 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## Introduction
+
+We perform the Differential Gene Expression analysis among the groups via limma packages
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(edgeR)
+library(limma)
+library(ggplot2)
+
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data
+
+1. Human: the number of samples (n=197)
+
+  * NC:  69
+  
+  * DCM: 63
+  
+  * ICM: 65
+  
+  * HCM: 8
+  
+  * NICM: 20 
+
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+  
+  * HF: 25
+  
+```{r}
+hsp.set_final <- readRDS("../../Result/Profile/final/Homo_sapiens_ExprSet_VoomSNM_symbol_final.RDS")
+mus.set_final <- readRDS("../../Result/Profile/final/Mus_musculus_ExprSet_VoomSNM_Hsymbol_final.RDS")
+phenotype_final <- read.csv("../../Result/Phenotype/phenotype_final.csv")
+```
+
+
+### Differential gene expression 
+
+the expression matrix was normalized by VOOM and SNM algorithm, so it couldn't use DESeq2 on DEA. Default threshold of the two parameters, **log2FoldChange** and **Adjust Pvalue** was 1 and 0.05 respectively.
+
+```{r}
+get_DiffGene <- function(dataset=hsp.set_final,
+                         metadata=phenotype_final,
+                         group_col=c("TAC", "TAC_NC"),
+                         fc=1,
+                         Pval=0.05){
+  
+  # dataset=hsp.set_final
+  # metadata=phenotype_final
+  # group_col=c("DCM", "NC")
+  # fc=1
+  # Pval=0.05
+  
+  pheno <- pData(dataset) 
+  edata <- exprs(dataset)
+  
+  phen <- pheno %>% data.frame() %>%
+    filter(Group%in%group_col) %>%
+    rownames_to_column("SampleID") %>%
+    filter(SampleID %in% metadata$SampleID) %>%
+    column_to_rownames("SampleID")
+  phen$Group <- factor(phen$Group, levels = group_col)
+  print(table(phen$Group))
+  
+  prof <- edata %>% data.frame() %>%
+    dplyr::select(rownames(phen))
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prof)){ 
+    if (!(colnames(prof)[i] == rownames(phen)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  design <- model.matrix(~0 + phen$Group)
+  rownames(design) <- rownames(phen)
+  colnames(design) <- group_col
+  exprSet <- prof
+  
+  # show distribution
+  boxplot(exprSet)
+  plotDensities(exprSet)
+  
+  # linear fitting 
+  fit <- lmFit(exprSet, design, method = 'ls')
+  
+  # contrast group 
+  group <- paste(group_col, collapse = "-")
+  if(group%in%"TAC-TAC_NC"){
+    contrast <- makeContrasts("TAC-TAC_NC", levels = design) 
+  }else if(group%in%"HF-HF_NC"){
+    contrast <- makeContrasts("HF-HF_NC", levels = design)
+  }else if(group%in%"HF-TAC"){
+    contrast <- makeContrasts("HF-TAC", levels = design)
+  }else if(group%in%"DCM-NC"){
+    contrast <- makeContrasts("DCM-NC", levels = design)
+  }else if(group%in%"HCM-NC"){
+    contrast <- makeContrasts("HCM-NC", levels = design)
+  }else if(group%in%"ICM-NC"){
+    contrast <- makeContrasts("ICM-NC", levels = design)
+  }else if(group%in%"NICM-NC"){
+    contrast <- makeContrasts("NICM-NC", levels = design)
+  }
+  print(contrast)
+  
+  # eBayes
+  fit2 <- contrasts.fit(fit, contrast)
+  fit2 <- eBayes(fit2)
+  
+  qqt(fit2$t, df = fit2$df.prior+fit2$df.residual, pch = 16, cex = 0.2)
+  abline(0,1)
+  
+  # differential features
+  diff_gene <- topTable(fit2, number = Inf, adjust.method = 'BH') %>%
+    rownames_to_column("GeneID")
+  
+  prof[rownames(prof)%in%"COL8A1", , F] %>% t() %>% data.frame() %>%
+    rownames_to_column("SampleID") %>%
+    inner_join(phen%>%rownames_to_column("SampleID"), by = "SampleID") -> a1
+  wilcox.test(COL8A1~Group, data = a1)
+  ggplot(a1, aes(x=Group, y=COL8A1))+geom_boxplot()
+  
+  diff_gene[which(diff_gene$logFC >= fc & diff_gene$adj.P.Val < Pval), "Enrichment"] <- group_col[1]
+  diff_gene[which(diff_gene$logFC <= -fc & diff_gene$adj.P.Val < Pval), "Enrichment"] <- group_col[2]
+  diff_gene[which(abs(diff_gene$logFC) < fc | diff_gene$adj.P.Val >= Pval), "Enrichment"] <- "Nonsignif"
+  
+  res <- diff_gene %>% dplyr::select(GeneID, logFC, adj.P.Val, Enrichment, everything()) %>%
+    arrange(adj.P.Val, logFC) 
+  
+  print(dim(res %>% filter(Enrichment != "Nonsignif")))
+  
+  return(res)
+}
+```
+
+
+### Run the Differential Expression Analysis
+
+#### DCM(n=63) vs NC(n=69)  
+```{r}
+if(!dir.exists("../../Result/Differential/final")){
+  dir.create("../../Result/Differential/final", recursive = T)
+}
+
+
+DCM_DEA <- get_DiffGene(dataset = hsp.set_final, group_col = c("DCM", "NC"))
+
+write.csv(DCM_DEA, "../../Result/Differential/final/Hsp_DCM_NC_Diffgene.csv", row.names = F)
+```
+
+
+#### ICM(n=65) vs NC(n=69)  
+```{r}
+ICM_DEA <- get_DiffGene(dataset = hsp.set_final, group_col = c("ICM", "NC"))
+
+write.csv(ICM_DEA, "../../Result/Differential/final/Hsp_ICM_NC_Diffgene.csv", row.names = F)
+```
+
+
+#### HCM(n=8) vs NC(n=69)  
+```{r}
+HCM_DEA <- get_DiffGene(dataset = hsp.set_final, group_col = c("HCM", "NC"))
+
+write.csv(HCM_DEA, "../../Result/Differential/final/Hsp_HCM_NC_Diffgene.csv", row.names = F)
+```
+
+
+#### NICM(n=20) vs NC(n=69)  
+```{r}
+NICM_DEA <- get_DiffGene(dataset = hsp.set_final, group_col = c("NICM", "NC"))
+
+write.csv(NICM_DEA, "../../Result/Differential/final/Hsp_NICM_NC_Diffgene.csv", row.names = F)
+```
+
+
+#### TAC(n=63) vs TAC_NC(n=69)  
+```{r}
+Mus_TAC_DEA <- get_DiffGene(dataset = mus.set_final, group_col = c("TAC", "TAC_NC"))
+
+write.csv(Mus_TAC_DEA, "../../Result/Differential/final/Mus_TAC_NC_Diffgene.csv", row.names = F)
+```
+
+
+#### HF(n=25) vs HF_NC(n=18)  
+```{r}
+Mus_HF_DEA <- get_DiffGene(dataset = mus.set_final, group_col = c("HF", "HF_NC"))
+
+write.csv(Mus_HF_DEA, "../../Result/Differential/final/Mus_HF_NC_Diffgene.csv", row.names = F)
+```
+
+
+### Systemic information
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [R包limma作差异基因分析](https://cloud.tencent.com/developer/article/1667505)

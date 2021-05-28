@@ -1,0 +1,407 @@
+---
+title: "Enriched pathway analysis: fgsea"
+date: "Created: 2021-01-29 Updated: `r Sys.Date()`"
+author: 
+  - name: "Hua Zou"
+    email: "zouhua1@outlook.com"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## Introduction
+
+Performing Enriched pathway analysis via fgsea package
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(data.table)
+library(fgsea)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data 
+
+* gene Expression DESeq2 object
+```{r}
+DCM_NC_DEGs <- read.csv("../../Result/Differential/Hsp_DCM_NC_Diffgene.csv")
+ICM_NC_DEGs <- read.csv("../../Result/Differential/Hsp_ICM_NC_Diffgene.csv")
+
+TAC_NC_DEGs <- read.csv("../../Result/Differential/Mus_TAC_HF_Diffgene.csv")
+HF_NC_DEGs <- read.csv("../../Result/Differential/Mus_HF_NC_Diffgene.csv")
+
+pathways_hallmark_kegg <- gmtPathways("../../Result/GeneSetdb/msigdb.v7.1.symbols_KEGG.gmt")
+pathways_hallmark_GO <- gmtPathways("../../Result/GeneSetdb/msigdb.v7.1.symbols_GO.gmt")
+```
+
+
+### Curation Function 
+
+the Genes were ranked by the **stat** index.
+```{r}
+get_fgsea <- function(dataset=DCM_NC_DEGs,
+                      pathways=pathways_hallmark_kegg){
+  
+  # dataset=DCM_NC_DEGs
+  # pathways=pathways_hallmark_kegg
+  
+  dat <- dataset %>% data.frame() %>%
+    dplyr::rename(SYMBOL=GeneID) %>%
+    dplyr::select(SYMBOL, t) %>% 
+    na.omit() %>% 
+    distinct() %>% 
+    group_by(SYMBOL) %>% 
+    summarize(t=mean(t))
+  
+  ranks <- deframe(dat)
+
+  fgseaRes <- fgsea(pathways=pathways, 
+                    stats=ranks, 
+                    nperm=1000)
+  
+  pathways_gene <- pathways %>% 
+                    enframe("pathway", "SYMBOL") %>% 
+                    tidyr::unnest(cols = c(SYMBOL)) %>% 
+                    inner_join(dataset %>% dplyr::rename(SYMBOL=GeneID),
+                               by="SYMBOL") 
+  res <- list(ranks=ranks, fgres=fgseaRes, pgene=pathways_gene)
+  
+  return(res)
+}
+
+# barplot
+get_plot <- function(dataset=DCM_NC_kegg_gsea,
+                     pathways=pathways_hallmark_kegg,
+                     number=10,
+                     tag="kegg",
+                     group_name=c("DCM", "NC"),
+                     group_col=c("#77A2D1", "#6C326C")){
+
+  # dataset=DCM_NC_kegg_gsea
+  # pathways=pathways_hallmark_kegg
+  # number=10
+  # tag="kegg"
+  # group_name=c("DCM", "NC")
+  # group_col=c("#77A2D1", "#6C326C")  
+  
+  fgseaRes <- dataset$fgres
+  ranks <- dataset$ranks
+
+  topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=number), pathway]
+  topPathwaysDown <- fgseaRes[ES < 0][head(order(pval), n=number), pathway]
+  topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+  
+  if(tag == "kegg"){
+    names <- paste0("../../Result/Enrichment/KEGG_topPathway_", number, ".pdf")    
+  }else{
+    names <- paste0("../../Result/Enrichment/GO_topPathway_", number, ".pdf")    
+  }
+
+  pdf(file = names, width = 11, height = 10)
+  plotGseaTable(pathways[topPathways], 
+                ranks, 
+                fgseaRes, 
+                gseaParam=0.5)
+  dev.off()
+  
+  
+  fgseaResTidy <- fgseaRes %>%
+    as_tibble() %>%
+    filter(pathway%in%topPathways) %>%
+    arrange(desc(NES))%>%
+    mutate(color=ifelse(NES < 0, group_name[1], group_name[2]),
+           color=factor(color, levels = group_name))
+  
+ pl_bar <- ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES))+
+    geom_col(aes(fill = color))+
+    coord_flip()+
+    scale_fill_manual(values = group_col)+
+    labs(x="Pathway", y="Normalized Enrichment Score",
+         title="Hallmark pathways NES from GSEA") + 
+    guides(fill=guide_legend("Cluster"))+
+    theme_minimal()+
+    theme(axis.title = element_text(face = 'bold',color = 'black',size = 14),
+                  axis.text = element_text(color = 'black',size = 10),
+                  text = element_text(size = 8, color = "black", family="serif"),
+                  legend.position = 'right',
+                  legend.key.height = unit(0.6,'cm'),
+                  legend.text = element_text(face = "bold", color = 'black',size = 10),
+                  strip.text = element_text(face = "bold", size = 14))
+ 
+ return(pl_bar)
+}
+
+# es per pathway 
+get_es_plot <- function(dataset=kegg_gsea,
+                        pathways=pathways_hallmark_kegg,
+                        pathway_name="KEGG_REGULATION_OF_ACTIN_CYTOSKELETON"){
+  
+  # dataset=DCM_NC_kegg_gsea
+  # pathways=pathways_hallmark_kegg
+  # pathway_name="KEGG_REGULATION_OF_ACTIN_CYTOSKELETON"
+  
+  
+  pl <- plotEnrichment(pathways[[pathway_name]], dataset$ranks)+
+    labs(title=pathway_name,
+         x="Rank in Ordered DataSet",
+         y="Enrichment Score(ES)")+
+    theme(axis.title = element_text(face = 'bold',color = 'black',size = 14),
+                  axis.text = element_text(color = 'black',size = 10),
+                  text = element_text(size = 8, color = "black", family="serif"),
+                  legend.position = 'right',
+                  legend.key.height = unit(0.6,'cm'),
+                  legend.text = element_text(face = "bold", color = 'black',size = 10),
+                  strip.text = element_text(face = "bold", size = 14)) 
+  return(pl)
+}
+```
+
+
+### KEGG 
+
+* DCM vs NC 
+```{r}
+DCM_NC_kegg_gsea <- get_fgsea(dataset = DCM_NC_DEGs, pathways = pathways_hallmark_kegg)
+
+if(!dir.exists("../../Result/Enrichment")){
+  dir.create("../../Result/Enrichment", recursive = T)
+}
+saveRDS(DCM_NC_kegg_gsea, "../../Result/Enrichment/DCM_NC_KEGG_pathway_gsea.RDS")
+write.csv(DCM_NC_kegg_gsea$pgene, "../../Result/Enrichment/DCM_NC_KEGG_pathway_gsea_gene.csv", row.names = F)
+
+# plot per pathway 
+DCM_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON_pl <- 
+  get_es_plot(dataset=DCM_NC_kegg_gsea, pathways=pathways_hallmark_kegg,
+         pathway_name="KEGG_REGULATION_OF_ACTIN_CYTOSKELETON")
+ggsave("../../Result/Enrichment/DCM_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON.pdf",
+       DCM_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON_pl, width = 5, height = 4, dpi = 600)
+
+# top pathway
+DCM_NC_kegg_bar <- get_plot(dataset=DCM_NC_kegg_gsea, pathways=pathways_hallmark_kegg, 
+                     number=10, tag="kegg", 
+                     group_name=c("DCM", "NC"), 
+                     group_col=c("#77A2D1", "#6C326C"))
+DCM_NC_kegg_bar
+ggsave("../../Result/Enrichment/DCM_NC_KEGG_barplot.pdf", DCM_NC_kegg_bar, width = 10, height = 8, dpi = 600)
+```
+
+
+* ICM vs NC 
+```{r}
+ICM_NC_kegg_gsea <- get_fgsea(dataset = ICM_NC_DEGs, pathways = pathways_hallmark_kegg)
+
+if(!dir.exists("../../Result/Enrichment")){
+  dir.create("../../Result/Enrichment", recursive = T)
+}
+saveRDS(ICM_NC_kegg_gsea, "../../Result/Enrichment/ICM_NC_KEGG_pathway_gsea.RDS")
+write.csv(ICM_NC_kegg_gsea$pgene, "../../Result/Enrichment/ICM_NC_KEGG_pathway_gsea_gene.csv", row.names = F)
+
+# plot per pathway 
+ICM_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON_pl <- 
+  get_es_plot(dataset=ICM_NC_kegg_gsea, pathways=pathways_hallmark_kegg,
+         pathway_name="KEGG_REGULATION_OF_ACTIN_CYTOSKELETON")
+ggsave("../../Result/Enrichment/ICM_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON.pdf",
+       ICM_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON_pl, width = 5, height = 4, dpi = 600)
+
+# top pathway
+ICM_NC_kegg_bar <- get_plot(dataset=ICM_NC_kegg_gsea, pathways=pathways_hallmark_kegg, 
+                     number=10, tag="kegg", 
+                     group_name=c("ICM", "NC"), 
+                     group_col=c("#635F5F", "#6C326C"))
+ICM_NC_kegg_bar
+ggsave("../../Result/Enrichment/ICM_NC_KEGG_barplot.pdf", ICM_NC_kegg_bar, width = 10, height = 8, dpi = 600)
+```
+
+* TAC vs TAC_NC 
+```{r}
+TAC_NC_kegg_gsea <- get_fgsea(dataset = TAC_NC_DEGs, pathways = pathways_hallmark_kegg)
+
+if(!dir.exists("../../Result/Enrichment")){
+  dir.create("../../Result/Enrichment", recursive = T)
+}
+saveRDS(TAC_NC_kegg_gsea, "../../Result/Enrichment/TAC_NC_KEGG_pathway_gsea.RDS")
+write.csv(TAC_NC_kegg_gsea$pgene, "../../Result/Enrichment/TAC_NC_KEGG_pathway_gsea_gene.csv", row.names = F)
+
+# plot per pathway 
+TAC_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON_pl <- 
+  get_es_plot(dataset=TAC_NC_kegg_gsea, pathways=pathways_hallmark_kegg,
+         pathway_name="KEGG_REGULATION_OF_ACTIN_CYTOSKELETON")
+ggsave("../../Result/Enrichment/TAC_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON.pdf",
+       TAC_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON_pl, width = 5, height = 4, dpi = 600)
+
+# top pathway
+TAC_NC_kegg_bar <- get_plot(dataset=TAC_NC_kegg_gsea, pathways=pathways_hallmark_kegg, 
+                     number=10, tag="kegg", 
+                     group_name=c("TAC", "TAC_NC"), 
+                     group_col=c("#77A2D1", "#6C326C"))
+TAC_NC_kegg_bar
+ggsave("../../Result/Enrichment/TAC_NC_KEGG_barplot.pdf", TAC_NC_kegg_bar, width = 10, height = 8, dpi = 600)
+```
+
+
+* HF vs HF_NC 
+```{r}
+HF_NC_kegg_gsea <- get_fgsea(dataset = HF_NC_DEGs, pathways = pathways_hallmark_kegg)
+
+if(!dir.exists("../../Result/Enrichment")){
+  dir.create("../../Result/Enrichment", recursive = T)
+}
+saveRDS(HF_NC_kegg_gsea, "../../Result/Enrichment/HF_NC_KEGG_pathway_gsea.RDS")
+write.csv(HF_NC_kegg_gsea$pgene, "../../Result/Enrichment/HF_NC_KEGG_pathway_gsea_gene.csv", row.names = F)
+
+# plot per pathway 
+HF_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON_pl <- 
+  get_es_plot(dataset=HF_NC_kegg_gsea, pathways=pathways_hallmark_kegg,
+         pathway_name="KEGG_REGULATION_OF_ACTIN_CYTOSKELETON")
+ggsave("../../Result/Enrichment/HF_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON.pdf",
+       HF_NC_KEGG_REGULATION_OF_ACTIN_CYTOSKELETON_pl, width = 5, height = 4, dpi = 600)
+
+# top pathway
+HF_NC_kegg_bar <- get_plot(dataset=HF_NC_kegg_gsea, pathways=pathways_hallmark_kegg, 
+                     number=10, tag="kegg", 
+                     group_name=c("HF", "HF_NC"), 
+                     group_col=c("#635F5F", "#FFD169"))
+HF_NC_kegg_bar
+ggsave("../../Result/Enrichment/HF_NC_KEGG_barplot.pdf", HF_NC_kegg_bar, width = 10, height = 8, dpi = 600)
+```
+
+### GO 
+
+* DCM vs NC 
+```{r, fig.width=15}
+if(!dir.exists("../../Result/Enrichment")){
+  dir.create("../../Result/Enrichment", recursive = T)
+}
+
+DCM_NC_GO_gsea <- get_fgsea(dataset = DCM_NC_DEGs, pathways = pathways_hallmark_GO)
+saveRDS(DCM_NC_GO_gsea, "../../Result/Enrichment/DCM_NC_GO_pathway_gsea.RDS")
+write.csv(DCM_NC_GO_gsea$pgene, "../../Result/Enrichment/DCM_NC_GO_pathway_gsea_gene.csv", row.names = F)
+
+# plot per pathway 
+DCM_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl <- 
+  get_es_plot(dataset=DCM_NC_GO_gsea, pathways=pathways_hallmark_GO,
+         pathway_name="GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION")
+DCM_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl
+ggsave("../../Result/Enrichment/DCM_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION.pdf",
+       DCM_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl, width = 5, height = 4, dpi = 600)
+
+# top pathway
+DCM_NC_GO_bar <- get_plot(dataset=DCM_NC_GO_gsea, 
+                          pathways=pathways_hallmark_GO, 
+                          number=10, tag="GO", 
+                          group_name=c("DCM", "NC"), 
+                          group_col=c("#77A2D1", "#6C326C"))
+DCM_NC_GO_bar
+ggsave("../../Result/Enrichment/DCM_NC_GO_barplot.pdf", DCM_NC_GO_bar, width = 15, height = 8, dpi = 600)
+```
+
+* ICM vs NC 
+```{r, fig.width=15}
+if(!dir.exists("../../Result/Enrichment")){
+  dir.create("../../Result/Enrichment", recursive = T)
+}
+
+ICM_NC_GO_gsea <- get_fgsea(dataset = ICM_NC_DEGs, pathways = pathways_hallmark_GO)
+saveRDS(ICM_NC_GO_gsea, "../../Result/Enrichment/ICM_NC_GO_pathway_gsea.RDS")
+write.csv(ICM_NC_GO_gsea$pgene, "../../Result/Enrichment/ICM_NC_GO_pathway_gsea_gene.csv", row.names = F)
+
+# plot per pathway 
+ICM_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl <- 
+  get_es_plot(dataset=ICM_NC_GO_gsea, pathways=pathways_hallmark_GO,
+         pathway_name="GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION")
+ICM_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl
+ggsave("../../Result/Enrichment/ICM_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION.pdf",
+       ICM_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl, width = 5, height = 4, dpi = 600)
+
+# top pathway
+ICM_NC_GO_bar <- get_plot(dataset=ICM_NC_GO_gsea, 
+                          pathways=pathways_hallmark_GO, 
+                          number=10, tag="GO", 
+                          group_name=c("ICM", "NC"), 
+                          group_col=c("#FFD169", "#6C326C"))
+ICM_NC_GO_bar
+ggsave("../../Result/Enrichment/ICM_NC_GO_barplot.pdf", ICM_NC_GO_bar, width = 15, height = 8, dpi = 600)
+```
+
+* TAC vs TAC_NC
+```{r, fig.width=15}
+if(!dir.exists("../../Result/Enrichment")){
+  dir.create("../../Result/Enrichment", recursive = T)
+}
+
+TAC_NC_GO_gsea <- get_fgsea(dataset = TAC_NC_DEGs, pathways = pathways_hallmark_GO)
+saveRDS(TAC_NC_GO_gsea, "../../Result/Enrichment/TAC_NC_GO_pathway_gsea.RDS")
+write.csv(TAC_NC_GO_gsea$pgene, "../../Result/Enrichment/TAC_NC_GO_pathway_gsea_gene.csv", row.names = F)
+
+# plot per pathway 
+TAC_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl <- 
+  get_es_plot(dataset=TAC_NC_GO_gsea, pathways=pathways_hallmark_GO,
+         pathway_name="GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION")
+TAC_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl
+ggsave("../../Result/Enrichment/TAC_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION.pdf",
+       TAC_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl, width = 5, height = 4, dpi = 600)
+
+# top pathway
+TAC_NC_GO_bar <- get_plot(dataset=TAC_NC_GO_gsea, 
+                          pathways=pathways_hallmark_GO, 
+                          number=10, tag="GO", 
+                          group_name=c("TAC", "TAC_NC"), 
+                          group_col=c("#77A2D1", "#6C326C"))
+TAC_NC_GO_bar
+ggsave("../../Result/Enrichment/TAC_NC_GO_barplot.pdf", TAC_NC_GO_bar, width = 15, height = 8, dpi = 600)
+```
+
+* HF vs HF_NC 
+```{r, fig.width=15}
+if(!dir.exists("../../Result/Enrichment")){
+  dir.create("../../Result/Enrichment", recursive = T)
+}
+
+HF_NC_GO_gsea <- get_fgsea(dataset = HF_NC_DEGs, pathways = pathways_hallmark_GO)
+saveRDS(HF_NC_GO_gsea, "../../Result/Enrichment/HF_NC_GO_pathway_gsea.RDS")
+write.csv(HF_NC_GO_gsea$pgene, "../../Result/Enrichment/HF_NC_GO_pathway_gsea_gene.csv", row.names = F)
+
+# plot per pathway 
+HF_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl <- 
+  get_es_plot(dataset=HF_NC_GO_gsea, pathways=pathways_hallmark_GO,
+         pathway_name="GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION")
+HF_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl
+ggsave("../../Result/Enrichment/HF_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION.pdf",
+       HF_NC_GO_POSITIVE_REGULATION_OF_VIRAL_TRANSCRIPTION_pl, width = 5, height = 4, dpi = 600)
+
+# top pathway
+HF_NC_GO_bar <- get_plot(dataset=HF_NC_GO_gsea, 
+                          pathways=pathways_hallmark_GO, 
+                          number=10, tag="GO", 
+                          group_name=c("HF", "HF_NC"), 
+                          group_col=c("#635F5F", "#FFD169"))
+HF_NC_GO_bar
+ggsave("../../Result/Enrichment/HF_NC_GO_barplot.pdf", HF_NC_GO_bar, width = 15, height = 8, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [Fast Gene Set Enrichment Analysis](https://bioconductor.org/packages/release/bioc/manuals/fgsea/man/fgsea.pdf) 
+
+2. [DESeq results to pathways in 60 Seconds with the fgsea package](https://stephenturner.github.io/deseq-to-fgsea/)
+

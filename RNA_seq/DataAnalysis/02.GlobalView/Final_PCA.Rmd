@@ -1,0 +1,240 @@
+---
+title: "PCA"
+date: "Created:2020-7-15 Modified: 2020-8-12"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+
+grp <- c("TAC", "TAC_NC", "HF", "HF_NC", "MI", "MI_NC", "STZT1D", "STZT1D_NC")
+grp.col <- c("#283891", "#EED3AC", "#C1272D", "#9DCEDC", "#ED1C24", "#9DCEDC", "#F89C31", "#B6B6BA")
+
+btc <- c("b1", "b2", "novo", "public")
+btc.col <- c("#EE2B2B", "#BCD74B", "#6DC06A", "#2D6BB4")
+```
+
+### load data 
+```{r}
+prof <- fread("../../Result/Profile/stringtie_filtered_TPM.tsv") %>%
+  column_to_rownames("V1")
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20200716.csv")
+```
+
+### PCA function
+```{r}
+PCAFun <- function(group_col, batch, occurrence=0.2, ncount=10){
+  
+  # group_col=grp
+  # batch=btc
+  # #batch="b2"
+  # occurrence=0.2
+  # ncount=10
+  
+  
+  idx <- c("Group", "Batch")
+  sid <- intersect(colnames(prof), as.character(phen$SampleID_v2))
+  phe <- phen %>% select(SampleID_v2, idx) %>%
+    filter(SampleID_v2%in%sid) %>%
+    filter(Group%in%group_col) %>%
+    filter(Batch%in%batch) %>% 
+    mutate(Group=factor(as.character(Group), levels = grp),
+           Batch=factor(as.character(Batch), levels = btc)) 
+    
+  # match color 
+  match_color <- function(grp_lab, btc_lab){
+  
+      grp_idx <- pmatch(grp_lab, grp)
+      btc_idx <- pmatch(btc_lab, btc)
+      
+      grp_lab_col <- grp.col[grp_idx]
+      btc_lab_col <- btc.col[btc_idx]
+      
+      return(list(col_grp=grp_lab_col,
+                  col_btc=btc_lab_col))
+    } 
+  col_lab <- match_color(levels(phe$Group), 
+                          levels(phe$Batch))
+  
+  prf <- prof %>% dplyr::select(as.character(phe$SampleID_v2)) %>% 
+    rownames_to_column("Type") %>% 
+    filter(apply(dplyr::select(., -one_of("Type")), 1, 
+                 function(x){sum(x > 0)/length(x)}) > occurrence) %>%
+            data.frame(.) %>% 
+    column_to_rownames("Type")
+  prf <- prf[rowSums(prf) > ncount, ]
+  # pca 
+  pca <- prcomp(scale(t(prf), center = T, scale = T))
+  require(factoextra)
+  eig <- get_eig(pca)
+  # explains variable 
+  explains <- paste0(paste0("PC", seq(2)), "(", paste0(round(eig[1:2, 2], 2), "%"), ")")
+  # principal component score of each sample
+  score <- inner_join(pca$x %>% data.frame() %>% select(c(1:2)) %>% 
+                        rownames_to_column("SampleID_v2"), 
+                      phe, by = "SampleID_v2")
+  require(ggrepel)
+  pca_theme <- theme(axis.title = element_text(size=10, color="black", face="bold"),
+                     axis.text = element_text(size=9, color="black"),
+                     text = element_text(size=8, color="black"),
+                     strip.text = element_text(size=9, color="black", face="bold"), 
+                     panel.grid = element_blank(),
+                     legend.text=element_text(size=11, color = "black"),
+                     legend.position = c(1, 0),
+                     legend.justification = c(1, 0),
+                     legend.background = element_rect(color = "black", fill="white"))
+  if(length(batch) > 1){
+    pl <- ggplot(score, aes(x=PC1, y=PC2))+
+              geom_point(aes(color=Group), size=3.5, shape=16)+
+              stat_ellipse(aes(fill=Batch), geom = "polygon", alpha=0.6)+ 
+              geom_text_repel(aes(label=SampleID_v2), 
+                  fontface="bold", box.padding=unit(0.35, "lines"),
+                  point.padding=unit(0.5, "lines"), segment.colour = "black", size=4)+
+              geom_hline(yintercept = 0, linetype = 2, size = 1, alpha=.5)+ 
+              geom_vline(xintercept = 0, linetype = 2, size = 1, alpha=.5)+ 
+              labs(x=explains[1], y=explains[2])+
+              scale_color_manual(values = col_lab$col_grp,
+                                 labels = group_col)+
+              scale_fill_manual(values = col_lab$col_btc,
+                                 labels = batch)+
+              guides(color=guide_legend(title = NULL,keywidth=.7,keyheight=.7),
+                     fill=guide_legend(title = NULL,keywidth=.7,keyheight=.7))+
+              theme_bw()+
+              pca_theme
+  }else{
+    group_label <- cbind(PC1=tapply(score$PC1, score$Group, mean),
+                         PC2=tapply(score$PC2, score$Group, mean)) %>%
+                         data.frame() %>% na.omit() %>%
+                         rownames_to_column("Group")
+    group_border <- plyr::ddply(score, 'Group', function(x)x[chull(x[[2]], x[[3]]), ])
+
+    pl <- ggplot(score, aes(x=PC1, y=PC2))+
+              geom_point(aes(color=Group), size=3.5, shape=16)+
+              geom_text_repel(aes(label=SampleID_v2), size=4)+
+              geom_polygon(data = group_border, aes(fill = Group), 
+                           color = "black", alpha = 0.1, show.legend = FALSE)+
+              geom_hline(yintercept = 0, linetype = 2, size = 1, alpha=.5)+ 
+              geom_vline(xintercept = 0, linetype = 2, size = 1, alpha=.5)+ 
+              labs(x=explains[1], y=explains[2])+
+              scale_color_manual(values = col_lab$col_grp,
+                                 labels = group_col)+
+              scale_fill_manual(values = col_lab$col_btc,
+                                 labels = batch)+
+              guides(color=guide_legend(title = NULL,keywidth=.7,keyheight=.7),
+                     fill=guide_legend(title = NULL,keywidth=.7,keyheight=.7))+
+              theme_bw()+
+              pca_theme    
+  }
+  return(pl)
+}
+```
+
+
+### All
+```{r}
+PCAFun(group_col = grp, batch = btc)
+ggsave("../../Result/PDF/stringtie_filtered_TPM_PCA_All.pdf", width = 12, height = 8, dpi = 300)
+```
+
+#### All : b1 
+```{r}
+PCAFun(group_col = grp, batch = "b1")
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_All_b1.pdf", width = 8, height = 6, dpi = 300)
+```
+
+
+#### All : b2 
+```{r}
+PCAFun(group_col = grp, batch = "b2")
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_All_b2.pdf", width = 6, height = 4, dpi = 300)
+```
+#### All : novo 
+```{r}
+PCAFun(group_col = grp, batch = "novo")
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_All_novo.pdf", width = 8, height = 6, dpi = 300)
+```
+
+#### public
+```{r}
+PCAFun(group_col = grp, batch = "public")
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_All_public.pdf", width = 8, height = 6, dpi = 300)
+```
+
+
+### TAC vs TAC_NC
+```{r}
+PCAFun(group_col= c("TAC", "TAC_NC"), batch=c("b1", "novo"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_TACNC_b1_novo.pdf", width = 8, height = 6, dpi = 300)
+```
+
+#### TAC vs TAC_NC  : b1 
+```{r}
+PCAFun(group_col= c("TAC", "TAC_NC"), batch=c("b1"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_TACNC_b1.pdf", width = 8, height = 6, dpi = 300)
+```
+
+
+#### TAC vs TAC_NC  : novo 
+```{r}
+PCAFun(group_col= c("TAC", "TAC_NC"), batch=c("novo"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_TACNC_novo.pdf", width = 8, height = 6, dpi = 300)
+```
+
+### HF vs HF_NC
+```{r}
+PCAFun(group_col= c("HF", "HF_NC"), batch=c("b2", "novo"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_HFNC_b2_novo.pdf", width = 8, height = 6, dpi = 300)
+```
+
+#### HF vs HF_NC: b2
+```{r}
+PCAFun(group_col= c("HF", "HF_NC"), batch=c("b2"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_HFNC_b2.pdf", width = 8, height = 6, dpi = 300)
+```
+
+#### HF vs HF_NC: novo
+```{r}
+PCAFun(group_col= c("HF", "HF_NC"), batch=c("novo"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_HFNC_novo.pdf", width = 8, height = 6, dpi = 300)
+```
+
+### MI vs MI_NC
+```{r}
+PCAFun(group_col= c("MI", "MI_NC"), batch=c("public"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_MINC.pdf", width = 8, height = 6, dpi = 300)
+```
+
+### STZT1D vs STZT1D_NC
+```{r}
+PCAFun(group_col= c("STZT1D", "STZT1D_NC"), batch=c("public"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_STZT1DNC.pdf", width = 8, height = 6, dpi = 300)
+```
+
+### TAC vs HF 
+```{r}
+PCAFun(group_col= c("TAC", "HF"), batch=c("b1", "b2", "novo"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_TACHF_b12_novo.pdf", width = 8, height = 6, dpi = 300)
+```
+
+#### TAC vs HF : b1 b2
+```{r}
+PCAFun(group_col= c("TAC", "HF"), batch=c("b1", "b2"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_TACHF_b12.pdf", width = 8, height = 6, dpi = 300)
+```
+
+#### TAC vs HF : novo
+```{r}
+PCAFun(group_col= c("TAC", "HF"), batch=c("novo"))
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_TACHF_novo.pdf", width = 8, height = 6, dpi = 300)
+```
+
+### TAC vs HF vs MI vs STZT1D
+```{r}
+PCAFun(group_col= c("TAC", "HF", "MI", "STZT1D"), batch=btc)
+ggsave("../../Result/pdf/stringtie_filtered_TPM_PCA_TAC_HF_MI_STZT1D.pdf", width = 10, height = 8, dpi = 300)
+```

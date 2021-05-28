@@ -1,0 +1,195 @@
+---
+title: "The relationship of Metabolism and Macrophage gene"
+date: "Created: 2021-02-01 modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(patchwork)
+library(data.table)
+library(Hmisc)
+library(corrplot)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+```
+
+
+### load data 
+```{r}
+pathway_gene <- qusage::read.gmt("../../Result/GeneSetdb/metabolism_geneset_human/all.gmt")
+immnue_gene <- qusage::read.gmt("../../Result/GeneSetdb/Immune_cell_markergene.gmt")
+
+# individual
+mdat.ind <- fread("../../Result/sc_profile/Average/average_normal.csv") %>%
+  column_to_rownames("V1")
+# all 
+mdat.all <- fread("../../Result/sc_profile/Average/average_all_normal.csv") %>%
+  column_to_rownames("V1") %>%
+  mutate(CellType="All")
+```
+
+
+### get profile 
+```{r}
+get_profile <- function(express = mdat.ind,
+                        cell="cardiomyocyte"){
+  # express = mdat.ind
+  # cell="cardiomyocyte"
+  
+  dat <- express %>%
+        filter(CellType == cell) %>%
+    dplyr::select(-CellType) %>%
+    #mutate(Individual=paste0("S", sample)) %>%
+    column_to_rownames("Individual") %>%
+    t() %>% data.frame() %>%
+    rownames_to_column("HGNC_symbol")
+
+  
+  dat$median <- apply(dat[, -1], 1, median)
+  dat <- with(dat, dat[order(HGNC_symbol, median, decreasing = T), ])
+  dat.new <- dat[!duplicated(dat$HGNC_symbol), ] %>% dplyr::select(-median)
+  rownames(dat.new) <- NULL
+  temp <- dat.new  %>% column_to_rownames("HGNC_symbol") %>%
+    t() %>% data.frame()
+    
+  res <- temp[rowSums(temp) > 0, ]
+  
+  return(res)
+}
+
+cardiomyocyte <- get_profile(express = mdat.ind, cell="cardiomyocyte")
+endothelial <- get_profile(express = mdat.ind, cell="endothelial cells")
+fibroblasts <- get_profile(express = mdat.ind, cell="fibroblasts")
+macrophage <- get_profile(express = mdat.ind, cell="macrophage")
+Allcells <- get_profile(express = mdat.all, cell="All")
+```
+
+
+### get pathway and immune gene
+```{r}
+get_gene <- function(dataset=cardiomyocyte,
+                     genelist=pathway_gene$Glycolysis){
+
+  # dataset=cardiomyocyte
+  # genelist=pathway_gene$Glycolysis 
+  
+  sid <- intersect(genelist, colnames(dataset))
+  prof <- dataset %>% dplyr::select(sid)
+  
+  return(prof)
+}
+
+cardiomyocyte_Glycolysis <- get_gene(dataset = cardiomyocyte, genelist=pathway_gene$Glycolysis)
+cardiomyocyte_GlucoseOxidation <- get_gene(dataset = cardiomyocyte, genelist=pathway_gene$GlucoseOxidation)
+cardiomyocyte_FattyAcidOxidation <- get_gene(dataset = cardiomyocyte, genelist=pathway_gene$FattyAcidOxidation)
+
+endothelial_Glycolysis <- get_gene(dataset = endothelial, genelist=pathway_gene$Glycolysis)
+endothelial_GlucoseOxidation <- get_gene(dataset = endothelial, genelist=pathway_gene$GlucoseOxidation)
+endothelial_FattyAcidOxidation <- get_gene(dataset = endothelial, genelist=pathway_gene$FattyAcidOxidation)
+
+fibroblasts_Glycolysis <- get_gene(dataset = fibroblasts, genelist=pathway_gene$Glycolysis)
+fibroblasts_GlucoseOxidation <- get_gene(dataset = fibroblasts, genelist=pathway_gene$GlucoseOxidation)
+fibroblasts_FattyAcidOxidation <- get_gene(dataset = fibroblasts, genelist=pathway_gene$FattyAcidOxidation)
+
+macrophage_gene <- get_gene(dataset = macrophage, genelist=immnue_gene$Macrophage)
+```
+
+
+### get correlation 
+```{r}
+get_cor <- function(x=macrophage_gene, 
+                    y=cardiomyocyte_Glycolysis, 
+                    top=0.4, 
+                    pval=0.5){
+  
+  
+  # x=macrophage_gene
+  # y=cardiomyocyte_Glycolysis
+  # top=0.4
+  # pval=0.05
+  
+  
+  feature_x <- apply(t(x), 1, mean) %>% data.frame() %>%
+    setNames("Abundance") %>%
+    arrange(desc(Abundance)) %>%
+    rownames_to_column("Gene") %>%
+    filter(Abundance != 0) %>%
+    slice(1:ceiling(ncol(x)*top))
+  
+  feature_y <- apply(t(y), 1, mean) %>% data.frame() %>%
+    setNames("Abundance") %>%
+    arrange(desc(Abundance)) %>%
+    rownames_to_column("Gene") %>%
+    filter(Abundance != 0) %>%
+    slice(1:ceiling(ncol(y)*top))  
+  
+  
+  prf_x <- x[, colnames(x)%in%feature_x$Gene]
+  prf_y <- y[, colnames(y)%in%feature_y$Gene]
+  
+  mdat <- inner_join(prf_x %>% rownames_to_column("Gene"),
+                     prf_y %>% rownames_to_column("Gene"),
+                     by = "Gene") %>%
+    column_to_rownames("Gene")
+  
+  res_cor <- rcorr(as.matrix(mdat), type = "spearman")
+  
+  rho_raw <- res_cor$r[rownames(res_cor$r)%in%colnames(prf_x),
+                       colnames(res_cor$r)%in%colnames(prf_y)]
+  
+  pval_raw <- res_cor$P[rownames(res_cor$P)%in%colnames(prf_x),
+                        colnames(res_cor$P)%in%colnames(prf_y)]
+  
+  rho_raw[pval_raw > pval] <- 0
+  pval_raw[pval_raw > pval] <- NA 
+  
+  
+  corrplot(rho_raw,
+           method = "circle",
+           type = 'full',
+           p.mat = pval_raw,
+           sig.level = 0.05,
+           insig = 'blank')
+}
+```
+
+
+
+### macrophage
+
+#### cardiomyocyte  vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+get_cor(x=macrophage_gene, y=cardiomyocyte_Glycolysis, top = .9)
+get_cor(x=macrophage_gene, y=cardiomyocyte_GlucoseOxidation, top = 1)
+get_cor(x=macrophage_gene, y=cardiomyocyte_FattyAcidOxidation, top = 1)
+```
+
+
+#### fibroblast_PScore vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+get_cor(x=macrophage_gene, y=fibroblasts_Glycolysis, top = 0.9)
+get_cor(x=macrophage_gene, y=fibroblasts_GlucoseOxidation, top = 1)
+get_cor(x=macrophage_gene, y=fibroblasts_FattyAcidOxidation, top = 1)
+```
+
+
+#### endothelial_PScore vs macrophage_ImmuneScore
+```{r, fig.width=6, fig.height=5}
+get_cor(x=macrophage_gene, y=endothelial_Glycolysis, top = 0.9)
+get_cor(x=macrophage_gene, y=endothelial_FattyAcidOxidation, top = 1)
+get_cor(x=macrophage_gene, y=endothelial_FattyAcidOxidation, top = 1)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

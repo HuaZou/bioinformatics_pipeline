@@ -1,0 +1,264 @@
+---
+title: "Phenotype: The Status of multi-omics data"
+date: "Created: 2021-04-13 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+### Introduction
+
+The multi-omics data including **WES, CNV, Methylation, RNA-seq and the proteome of blood exosome** were generated from different person and investigating the overlap of the same population will contribute to our further data analysis. In other hand, each omic-layer data maybe derived from different patients' parts, such as **Lymphocyte, ParacancerousTissue, PrimaryCancerTissue and LiverMetastasis**, which lead to pay attention to subsequent analysis on these complexity data.
+
+Note: **We should not only focus on the multi-omics data, but also care for the different resources of the omics data.**
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(UpSetR)
+
+# rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+```
+
+
+### load data 
+```{r}
+Run <- F
+if(!Run){
+  phen <- read.csv("../../Result/phenotype/Pancreatic_tumor_merge_20210413.csv")
+}else{
+  # full merge phenotype and sampleid table 
+  phenotype <- read.csv("../../Result/phenotype/Pancreatic_tumor_phenotype_20210413.csv")
+  sampleid <-  read.csv("../../Result/phenotype/Pancreatic_tumor_sample_20210413.csv")
+  phen <- full_join(phenotype, sampleid, by = "PID")
+  write.csv(phen, "../../Result/phenotype/Pancreatic_tumor_merge_20210413.csv", row.names = F)  
+}
+```
+
+
+### Venn plot 
+```{r}
+plotdata <- phen %>% dplyr::select(PID, Omics) %>%
+  na.omit() %>%
+  reshape2::dcast(PID ~ Omics) #%>%
+  # mutate(CNV=ifelse(CNV > 0, 1, 0),
+  #        Exosome=ifelse(Exosome > 0, 1, 0),
+  #        METH=ifelse(METH > 0, 1, 0),
+  #        RNA=ifelse(RNA > 0, 1, 0),
+  #        WES=ifelse(WES > 0, 1, 0))
+plotdata[plotdata > 0] <- 1
+
+upset(plotdata, 
+      sets = c("WES", "CNV", "METH", "RNA", "Exosome"),
+      mb.ratio = c(0.55, 0.45),
+      order.by = c("freq", "degree"), 
+      decreasing = c(TRUE, TRUE),
+      sets.bar.color = "#995ee1",
+      sets.x.label = "Total Participants",
+      mainbar.y.label = "The Intersections of Participants",
+      keep.order = TRUE,
+      point.size = 3.5, 
+      line.size = 2,
+      text.scale = c(2, 2, 2, 2, 2, 2),
+      queries = list(
+        list(
+          query = intersects,
+          params = list("WES", "CNV", "METH", "RNA", "Exosome"), 
+          color = "blue", 
+          active = T,
+          query.name = "Exosome vs RNA"
+        ),
+        list(
+          query = intersects,
+          params = list("WES", "CNV", "METH", "RNA"), 
+          color = "red", 
+          active = T
+        )        
+      )
+    )
+      # empty.intersections = "on")
+```
+
+
+### Participants per omics data 
+```{r, fig.width=10, fig.height=12}
+Omics_derived <- function(tag="RNA"){
+  
+  # tag="RNA"
+  
+  partdata <- phen %>% dplyr::select(PID, Type, Omics) %>%
+    na.omit()
+  
+  plotdata <- partdata %>% filter(Omics == tag) %>%
+    reshape2::dcast(PID ~ Type)
+  
+  datpl <- plotdata %>% 
+    tidyr::gather(key="Group", value = "Value", -PID) %>%
+    # mutate(Group=ifelse(is.na(Value), NA, Group)) %>%
+    na.omit()
+  
+  title_name <- paste("The Distribution of ", tag, " per Participant")
+  
+  pl <- ggplot(data = datpl, aes(x=Group, y=PID))+
+    geom_point(size = 3)+
+    labs(x="", y="", title = title_name)+
+    theme_bw()+
+    theme(plot.title = element_text(color = 'black', size = 14, hjust = .5, face = "bold"),
+          axis.text.x = element_text(color = 'black', size = 12, angle = 30, hjust = 1, face = "bold"),
+          axis.text.y = element_text(color = 'black', size = 10, face = "bold"),
+          text = element_text(size = 10, color = "black", family="serif")) 
+  
+  return(pl)
+}
+
+
+RNA_pl <- Omics_derived(tag="RNA")
+WES_pl <- Omics_derived(tag="WES")
+CNV_pl <- Omics_derived(tag="CNV")
+METH_pl <- Omics_derived(tag="METH")
+
+cowplot::plot_grid(RNA_pl, WES_pl, CNV_pl, METH_pl, nrow = 2, align = "hv")
+```
+
+
+### 20210415
+
+Putting multi-omics data into one plot
+```{r, fig.width=12, fig.height=10}
+dat <- phen %>% dplyr::select(PID, Type, Omics) %>%
+  na.omit() %>%
+  mutate(New_Type=gsub("_RNA|Blood_|_WES|_METH|_CNV", "", Type)) %>%
+  mutate(Type=factor(Type, 
+                     levels = c("Lymphocyte_WES", "Lymphocyte_CNV",
+                                "ParacancerousTissue_METH", "ParacancerousTissue_RNA",
+                                "PrimaryCancerTissue_WES", "PrimaryCancerTissue_CNV",
+                                "PrimaryCancerTissue_METH", "PrimaryCancerTissue_RNA",
+                                "LiverMetastasis_WES", "LiverMetastasis_CNV", 
+                                "LiverMetastasis_METH", "LiverMetastasis_RNA",
+                                "Blood_Exosome"
+                                ))) %>%
+  mutate(Omics=factor(Omics, 
+                      levels = c("WES", "CNV", "METH", "RNA", "Exosome"))) %>%
+  mutate(New_Type=factor(New_Type, 
+                         levels = c("Lymphocyte", "ParacancerousTissue",
+                                    "PrimaryCancerTissue", "LiverMetastasis",
+                                    "Exosome")))
+
+ggplot(data = dat, aes(x=Type, y=PID))+
+    geom_point(aes(color=Omics, shape=Omics), size = 3.5, stroke = 1)+
+    labs(x="", y="")+
+    geom_line(aes(group=PID), linetype=2)+
+    scale_color_manual(values = c("#A6CEE3", "#1F78B4", "#08306B", "#B2DF8A", "#006D2C"))+
+    scale_shape_manual(values = c(16:25))+
+    facet_wrap(facets = "New_Type", scales = "free_x", nrow = 1)+
+    theme_bw()+
+    theme(#axis.text.x = element_text(color = 'black', size = 12, angle = 30, hjust = 1, face = "bold"),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_text(color = 'black', size = 10, face = "bold"),
+          text = element_text(size = 10, color = "black", family="serif"),
+          strip.background = element_rect(fill = "white", colour = "black"),
+          strip.text = element_text(color = 'black', size = 14, face = "bold"),
+          legend.key = element_blank(),
+          legend.title = element_blank(),
+          legend.text = element_text(size = 12, color = "black"),
+          legend.box.background = element_rect(colour = "black")) 
+```
+
+
+### Summary participants' information 4/29/2021
+```{r}
+library(gtsummary)
+phen <- read.csv("../../Result/phenotype/Pancreatic_tumor_merge_20210426.csv")
+
+prepare_table <- function(tag = "RNA"){
+  
+  # tag="RNA"
+  
+  dat <- phen %>% filter(Omics == tag) %>%
+    dplyr::select(Type, Gender, Age, Vital_status, Stage) %>%
+    mutate(Vital_status = ifelse(Vital_status == 1, "Death", "Live"))
+  dat_tbl_summary <- dat %>%
+    tbl_summary(
+      by = Type,
+      statistic = list(
+       all_continuous() ~ "{mean} ({sd})",
+       all_categorical() ~ "{n}/{N} ({p}%)")) %>%
+    add_p(pvalue_fun=function(x){style_pvalue(x, digits = 3)}) %>%
+    #add_overall() %>%
+    bold_labels() #%>%
+    # modify_spanning_header(all_stat_cols() ~ "**{tag}**")    
+  
+  return(dat_tbl_summary)
+}
+
+WES_summary <- prepare_table(tag = "WES")
+WES_summary
+CNV_summary <- prepare_table(tag = "CNV")
+WES_summary
+RNA_summary <- prepare_table(tag = "RNA")
+RNA_summary
+Meth_summary <- prepare_table(tag = "METH")
+Meth_summary
+Exosome_summary <- prepare_table(tag = "Exosome")
+Exosome_summary
+```
+
+
+### 20210507
+```{r, fig.width=8, fig.height=7}
+filter_type <- c("ParacancerousTissue_METH", "ParacancerousTissue_RNA",
+                 "PrimaryCancerTissue_METH", "PrimaryCancerTissue_RNA", 
+                 "LiverMetastasis_METH", "LiverMetastasis_RNA")
+dat <- phen %>% dplyr::select(PID, Type, Omics) %>%
+  na.omit() %>%
+  filter(Omics%in%c("RNA", "METH")) %>%
+  #mutate(Type=paste(Type, Omics, sep = "_")) %>%
+  mutate(New_Type=gsub("_RNA|Blood_|_WES|_METH|_CNV", "", Type)) %>%
+  mutate(Type=factor(Type, 
+                     levels = filter_type)) %>%
+  mutate(Omics=factor(Omics, 
+                      levels = c("METH", "RNA"))) %>%
+  mutate(New_Type=factor(New_Type, 
+                         levels = c("ParacancerousTissue",
+                                    "PrimaryCancerTissue", "LiverMetastasis")))
+
+ggplot(data = dat, aes(x=Type, y=PID))+
+    geom_point(aes(color=Omics, shape=Omics), size = 3.5, stroke = 1)+
+    labs(x="", y="")+
+    geom_line(aes(group=PID), linetype=2)+
+    scale_color_manual(values = c("#A6CEE3", "#1F78B4", "#08306B", "#B2DF8A", "#006D2C"))+
+    scale_shape_manual(values = c(16:25))+
+    facet_wrap(facets = "New_Type", scales = "free_x", nrow = 1)+
+    theme_bw()+
+    theme(#axis.text.x = element_text(color = 'black', size = 12, angle = 30, hjust = 1, face = "bold"),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank(),
+          axis.text.y = element_text(color = 'black', size = 10, face = "bold"),
+          text = element_text(size = 10, color = "black", family="serif"),
+          strip.background = element_rect(fill = "white", colour = "black"),
+          strip.text = element_text(color = 'black', size = 14, face = "bold"),
+          legend.key = element_blank(),
+          legend.title = element_blank(),
+          legend.position = "bottom",
+          legend.text = element_text(size = 12, color = "black"),
+          legend.box.background = element_rect(colour = "black")) 
+```
+
+
+### systemic information
+```{r}
+sessionInfo()
+```
+
+
+### Reference
+
+1. [进阶版Venn plot：Upset plot入门实战代码详解——UpSetR包介绍](https://blog.csdn.net/tuanzide5233/article/details/83109527)
+
+2. [Presentation-Ready Summary Tables with gtsummary](http://www.danieldsjoberg.com/gtsummary/articles/gallery.html)

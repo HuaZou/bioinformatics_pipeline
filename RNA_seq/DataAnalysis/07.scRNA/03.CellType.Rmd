@@ -1,0 +1,407 @@
+---
+title: "CellType: identifying the celltype by marker genes"
+date: "Created: 2021-02-01; modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(Seurat)
+library(tibble)
+library(ggplot2)
+library(cowplot)
+
+# rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 4000 * 1024^2)
+
+colors <- c("#A6CEE3", "#1F78B4", "#08306B", "#B2DF8A", "#006D2C", "#8E0152",
+         "#DE77AE", "#CAB2D6", "#6A3D9A", "#FB9A99", "#E31A1C", "#B15928",
+         "#619CFF","#FF67A4","#00BCD8", "#EE2B2B", "#2D6BB4")
+```
+
+
+### load data 
+```{r}
+data.cluster <- readRDS("../../Result/sc_profile/hsp_normal/data.normal.cluster.RDS")
+```
+
+
+### Segregation of clusters by group
+```{r}
+n_cells <- FetchData(data.cluster, 
+                     vars = c("ident", "Batch")) %>%
+        dplyr::count(ident, Batch) %>%
+        tidyr::spread(ident, n)
+head(n_cells)
+# DT::datatable(n_cells)
+```
+
+
+### visualization
+```{r, fig.width=12, fig.height=6}
+cowplot::plot_grid( 
+        DimPlot(data.cluster,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 6), 
+        DimPlot(data.cluster,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 6, 
+        split.by = "Batch")+NoLegend(),
+        ncol = 2)
+```
+
+* Segregation of clusters by various sources of uninteresting variation
+
+```{r}
+metrics <-  c("nFeature_SCT", "percent.mt", "S.Score", "G2M.Score")
+FeaturePlot(data.cluster, 
+            reduction = "umap", 
+            features = metrics,
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+
+### UMAP for clusters
+```{r}
+colors2 <- c("#A6CEE3", "#1F78B4", "#08306B", "#B2DF8A", "#006D2C", 
+            "#8E0152","#DE77AE", "#CAB2D6", "#6A3D9A", "#FB9A99", 
+            "#E31A1C", "#B15928", "#619CFF","#FF67A4","#00BCD8", 
+            "#EE2B2B", "#2D6BB4","#AFD300", "#B089D8", "#F96E6F",
+            "#AAD3ED", "#639BCE")
+
+# data.cluster.v2 <- data.cluster
+# Idents(object = data.cluster.v2) <- "integrated_snn_res.0.4"
+
+DimPlot(data.cluster,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 8,
+        cols = colors2)
+```
+
+
+### Exploration of the PCs driving the different clusters
+```{r}
+# Defining the information in the seurat object of interest
+columns <- c(paste0("PC_", 1:16),
+            "ident",
+            "UMAP_1", "UMAP_2")
+
+# Extracting this data from the seurat object
+pc_data <- FetchData(data.cluster, 
+                     vars = columns)
+
+# Adding cluster label to center of cluster on UMAP
+tsne_label <- FetchData(data.cluster, 
+                        vars = c("ident", "UMAP_1", "UMAP_2"))  %>%
+  group_by(ident) %>%
+  summarise(x=mean(UMAP_1), y=mean(UMAP_2))
+  
+# Plotting a UMAP plot for each of the PCs
+pc_plot <- purrr::map(paste0("PC_", 1:16), function(pc){
+        ggplot(pc_data, 
+               aes(UMAP_1, UMAP_2)) +
+                geom_point(aes_string(color=pc), 
+                           alpha = 0.7) +
+                scale_color_gradient(guide = FALSE, 
+                                     low = "grey90", 
+                                     high = "blue")  +
+                geom_text(data=tsne_label, 
+                          aes(label=ident, x, y)) +
+                ggtitle(pc)
+}) %>% plot_grid(plotlist = .)
+```
+
+* Examine PCA results 
+```{r}
+print(data.cluster[["pca"]], dims = 1:5, nfeatures = 5)
+```
+
+
+
+### Identification of all markers for each cluster
+```{r}
+annotations <- read.csv("../../Result/sc_profile/Celltype/annotation.csv")
+if(0){
+  
+  # markers <- FindAllMarkers(object = data.cluster,
+  #                           only.pos = TRUE,
+  #                           logfc.threshold = 0.25)
+  
+  markers <- FindAllMarkers(object = data.cluster,
+                            test.use = "wilcox",
+                            min.pct = 0.2,
+                            min.diff.pct = 0.1,
+                            return.thresh = 0.05,
+                            only.pos = TRUE,
+                            logfc.threshold = 0.25) %>%
+    filter(p_val_adj < 1e-06)
+  write.csv(markers, "../../Result/sc_profile/hsp_normal/data.normal.markergenes.csv") 
+}
+
+markers <- read.csv("../../Result/sc_profile/hsp_normal/data.normal.markergenes.csv", row.names = 1)
+```
+
+
+### evaluating marker genes : identify the top gene marker per cluster
+```{r, fig.width=12, fig.height=10}
+anno_all_markers <- markers %>%
+        left_join(y = unique(annotations[, c("gene_name", "description")]),
+                  by = c("gene" = "gene_name")) %>%
+        mutate(Specific=pct.1 - pct.2) #%>%
+  #arrange(dplyr::desc(Specific), dplyr::desc(avg_logFC))
+
+# Extract top markers per cluster
+topNumber <- anno_all_markers %>% 
+    group_by(cluster) %>% 
+    top_n(n = 20, wt = avg_logFC) %>%
+    ungroup()
+mapal <- colorRampPalette(c("#EEEED1", "#AEDCF9", "#10106A"))(20)
+top_heatmap <- DoHeatmap(object = data.cluster, 
+                         features = topNumber$gene, 
+                         label = TRUE)+
+  scale_fill_gradientn(colours = mapal)
+top_heatmap
+```
+
+
+### pearson correlation
+
+choosing the average expression per cluster
+```{r}
+library(pheatmap)
+exp_ave <- AverageExpression(data.cluster)
+CorOb.cor.exp <- as.data.frame(cor(exp_ave$SCT, method = "spearman"))
+pheatmap(CorOb.cor.exp)
+```
+
+
+### The marker genes of Heart cell types 
+
+#### 1. cardiomyocyte
+
+  * TTN, MYH7, MYH6, TNNT2,  
+  
+  * MLCK2, MYLK1, AAT7, MYLK 
+  
+  * BNP, NPPA, NPPB,  
+  
+  * ACTC1, TPM, RYR2, ATP2A2, TNNC1, ACTA1
+```{r, fig.width=8, fig.height=6}
+FeaturePlot(data.cluster, 
+            reduction = "umap", 
+            # features = c("TTN", "MYH7", "MYH6", "TNNT2", "MLCK2", "MYLK1", "AAT7", "MYLK", 
+            #              "BNP", "NPPA", "NPPB", "ACTC1", "TPM", "RYR2", "ATP2A2", "TNNC1", "ACTA1"),
+            features = c("MYH7", "MYH6", "MYLK", "NPPA", "NPPB", "ACTA1"),            
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+
+**Results: cluster 1, 5, 7, 8 (maybe include cluster 6, 12)**
+
+
+#### 2. fibroblasts: 
+
+  * LUM, DCN, C7, SERPINF1, FBLN1
+  
+  * COL1A2, COL3A1, VIM, FSTL1, GSN, FBLN2, SPARC, MMP2
+```{r, fig.width=10, fig.height=8}
+FeaturePlot(data.cluster, 
+            reduction = "umap", 
+            features = c("LUM", "DCN", "C7", "SERPINF1", "FBLN1",  
+                         "COL1A2", "COL3A1", "VIM", "FSTL1", "GSN", "FBLN2", "SPARC", "MMP2"),
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+
+**Results: cluster 0, 3, 10, 13 (maybe include cluster 6, 12)**
+
+
+#### 3. endothelial cell: 
+
+  * AQP1, BST2, CXCL2, VWF, IFI27, PECAM1
+  
+  * FABP4, TIE1, EGFL7, FLT1, EPAS, EMCN, EDNRB
+```{r, fig.width=10, fig.height=6}
+FeaturePlot(data.cluster, 
+            reduction = "umap", 
+            # features = c("AQP1", "CXCL2","VWF", "PECAM1", "IFI27",
+            #              "FABP4", "TIE1", "EGFL7", "FLT1", "EPAS", "EMCN", "EDNRB"),
+            features = c("AQP1", "CXCL2","VWF", "PECAM1", "IFI27",
+                         "FABP4", "EGFL7", "FLT1", "EMCN", "EDNRB"),
+            pt.size = 0.2, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+
+**Result: cluster 0, 10, 13**
+
+#### 4. smooth muscle cell: 
+
+  * MYH11, CALD1, ACTA2, IGFBP7, RGS5 
+```{r}
+FeaturePlot(data.cluster, 
+            reduction = "umap", 
+            features = c("MYH11", "CALD1", "ACTA2", "RGS5"),
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+
+**Result: cluster 6, 12**
+
+
+#### 5. Macrophages: 
+
+  * AIF1, MS4A6A, C3AR1, CXCL8
+  
+  * CD74, CD163, LYZ1, EMR1, CSFR1, LGALS3, CD68, ITGAM
+```{r, fig.width=8, fig.height=6}
+FeaturePlot(data.cluster, 
+            reduction = "umap", 
+            # features = c("AIF1", "MS4A6A", "C3AR1", "CXCL8", 
+            #              "CD74", "CD163", "LYZ1", "EMR1", "CSFR1", "LGALS3", "CD68", "ITGAM"),
+            
+            features = c("AIF1", "MS4A6A", "CXCL8", "CD74", "CD163", "CD68"),            
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+
+**Result: cluster 14**
+
+### gene Markers: manual annotation
+
+[panglaodb](https://panglaodb.se/index.html)
+
+|   Cluster   |      Celltype           |
+| :---------: | :----------------------:|
+|     0       |     cardiomyocyte       |
+|     1       |     endothelial cell    |
+|     2       |       unknow cell       |
+|     3       |    smooth muscle cell   |
+|     4       |       fibroblasts       |
+|     5       |       unknow cell       |
+|     6       |       cardiomyocyte     |
+|     7       |      cardiomyocyte      |
+|     8       |        unknow cell      |
+|     9       |   smooth muscle cell    |
+|     10      |      macrophages        |
+|     11      |     endothelial cell    |
+|     12      |   smooth muscle cell    |
+|     13      |      macrophages        |
+|     14      |     endothelial cell    |
+
+
+### Rename all identities
+```{r}
+data.cluster_rename <- RenameIdents(object = data.cluster, 
+                               "0" = "cardiomyocyte",
+                               "1" = "endothelial cells",
+                               "2" = "unknow cells",
+                               "3" = "smooth muscle cells",
+                               "4" = "fibroblast",
+                               "5" = "unknow cells",
+                               "6" = "cardiomyocyte",
+                               "7" = "cardiomyocyte",
+                               "8" = "unknow cells",
+                               "9" = "smooth muscle cells",
+                               "10" = "macrophage",
+                               "11" = "endothelial cells")
+
+DimPlot(object = data.cluster_rename, 
+        reduction = "umap", 
+        label = TRUE,
+        label.size = 5,
+        repel = TRUE,
+        cols = colors)
+```
+
+* Remove the stressed or dying cells
+```{r}
+data.cluster_rename <- subset(data.cluster_rename,
+                          idents = "unknow cells", 
+                          invert = TRUE)
+
+# Re-visualize the clusters
+DimPlot(object = data.cluster_rename, 
+        reduction = "umap", 
+        label = TRUE,
+        label.size = 5,
+	      repel = TRUE,
+        cols = colors)
+```
+
+```{r}
+n_cells2 <- FetchData(data.cluster_rename, 
+                     vars = c("ident", "Individual")) %>%
+        dplyr::count(ident, Individual) %>%
+        tidyr::spread(ident, n)
+DT::datatable(n_cells2)
+
+n_cells2 <- FetchData(data.cluster_rename, 
+                     vars = c("ident", "Batch")) %>%
+        dplyr::count(ident, Batch) %>%
+        tidyr::spread(ident, n)
+DT::datatable(n_cells2)
+```
+
+
+### save data
+```{r}
+saveRDS(data.cluster, "../../Result/sc_profile/RDS/data.normal.celltype.rds", compress = TRUE)
+saveRDS(data.cluster_rename, "../../Result/sc_profile/RDS/data.normal.celltype_rename.rds", compress = TRUE)
+```
+
+
+### 20210305
+
+Investigating the different stages of Macrophages, including M1 and M2 Macrophages via marker genes
+
+* inflammation-inducing M1 macrophages: FCGR1A, IDO1, SOCS1, CXCL10
+```{r}
+FeaturePlot(data.cluster, 
+            reduction = "umap", 
+            features = c("FCGR1A", "IDO1", "SOCS1", "CXCL10"),
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+
+
+* inflammation-inhibiting M2 macrophages: MRC1, TGM2, FCER2, CCL22
+```{r}
+FeaturePlot(data.cluster, 
+            reduction = "umap", 
+            features = c("MRC1", "TGM2", "FCER2", "CCL22"),
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+
+
+1. [不同单细胞R包的数据格式相互转换](https://www.jianshu.com/p/50e289a694d2)
+

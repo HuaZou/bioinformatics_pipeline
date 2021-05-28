@@ -1,0 +1,323 @@
+---
+title: "Finding the outlier on human bulk RNA-seq samples"
+date: "Created: 2021-01-25 modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+### Introduction
+
+We wanna know the tendency of metabolic pathway among group
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(data.table)
+library(ggpubr)
+library(ggrepel)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data 
+```{r}
+# pathway score
+hsp_Pscore <- fread("../../Result/Pathway/Score/hsp_ssgsea.csv")
+mus_Pscore_all <- fread("../../Result/Pathway/Score/mus_ssgsea_all.csv")
+mus_Pscore_pub <- fread("../../Result/Pathway/Score/mus_ssgsea_pub.csv")
+mus_Pscore_self <- fread("../../Result/Pathway/Score/mus_ssgsea_self.csv")
+
+
+# immune score
+hsp_Iscore <- fread("../../Result/Immune_score/Score/hsp_ImmuneScore.csv")
+mus_Iscore_all <- fread("../../Result/Immune_score/Score/mus_all_ImmuneScore.csv")
+mus_Iscore_pub <- fread("../../Result/Immune_score/Score/mus_pub_ImmuneScore.csv")
+mus_Iscore_self <- fread("../../Result/Immune_score/Score/mus_self_ImmuneScore.csv")
+
+
+# phenotype 
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20210118.csv")
+```
+
+
+### curate data 
+```{r}
+get_plot <- function(pscore = hsp_Pscore,
+                     iscore = hsp_Iscore,
+                     tag="hsp",
+                     group_name=c("NC", "DCM", "ICM")){
+  
+  # pscore = hsp_Pscore
+  # iscore = hsp_Iscore
+  # tag <- "hsp"
+  # group_name=c("NC", "DCM", "ICM")
+
+  mdat <- subset(phen, select = c(SampleID, Group)) %>% 
+    inner_join(inner_join(pscore, iscore %>% column_to_rownames("V1") %>%
+                       dplyr::select(ImmuneScore) %>%
+                       rownames_to_column("SampleID"), 
+                     by="SampleID"), 
+            by = "SampleID") %>%
+    filter(Group%in%group_name) %>%
+    mutate(Group=factor(as.character(Group), levels = group_name)) 
+  
+  
+  plotdata <- tidyr::gather(mdat, key="Type", value="Score", 
+                        -c("SampleID", "Group")) %>%
+    mutate(Type=factor(Type, levels = colnames(mdat)[3:6]))
+  
+  if(tag == "hsp"){
+    my_comparisons <- list(c(group_name[1], group_name[2]), 
+                           c(group_name[1], group_name[3]))
+    ref_color <- hsp.grp.col
+    ref_grp <- hsp.grp
+  }else{
+    my_comparisons <- list(c(group_name[1], group_name[2]), 
+                           c(group_name[3], group_name[4]),
+                           c(group_name[2], group_name[4]))
+    ref_color <- mus.grp.col
+    ref_grp <- mus.grp
+  }
+  
+  group_color <- ref_color[pmatch(group_name, ref_grp)]
+  
+  pl <- ggplot(plotdata, aes(x=Group, y=Score))+
+      geom_dotplot(aes(color=Group, fill=Group), 
+                   binaxis='y', stackdir='center', dotsize = .7)+
+      # errorbar 
+      stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
+          geom="errorbar", width=0.1, size=1) +
+      # median line : crossbar  
+      stat_summary(fun=median, geom="crossbar", color="black", size=.4, width=.4)+
+      stat_compare_means(comparisons = my_comparisons,
+                         method = "wilcox.test")+
+      labs(x="", y="Activity score")+
+      scale_fill_manual(values = group_color)+
+      scale_color_manual(values = group_color)+
+      guides(fill=F, color=F, shape=F)+
+      facet_wrap(Type ~ ., scales = "free_y")+ 
+      theme_bw()+
+      theme(axis.title.y = element_text(face = 'bold',color = 'black', size = 14),
+            axis.title.x = element_text(face = 'bold',color = 'black', size = 14,
+                                        vjust = -1.2),
+            text = element_text(size = 8, color = "black", family = "serif"),
+            axis.text.y = element_text(face = 'bold', color = 'black', size = 10),
+            axis.text.x = element_text(face = 'bold', color = 'black', size = 12),
+            axis.line = element_line(color = "black", size = .2),
+            panel.grid = element_blank(),
+            strip.text = element_text(size = 10, face = "bold"))  
+  
+  return(pl)  
+}
+```
+
+
+### Human
+```{r, fig.width=8, fig.height=8}
+hsp_pl <- get_plot(pscore = hsp_Pscore,
+                           iscore = hsp_Iscore,
+                           tag = "hsp",
+                           group_name=c("NC", "DCM", "ICM"))
+hsp_pl
+#ggsave("../../Result/Figures/Fig2_association.pdf", hsp_pl, width = 7, height = 11, dpi = 600)
+```
+
+
+### Mouse all
+```{r, fig.width=8, fig.height=8}
+mus_pl_all <- get_plot(pscore = mus_Pscore_all,
+                       iscore = mus_Iscore_all,
+                       tag = "mus",
+                       group_name=c("TAC_NC", "TAC", "HF_NC", "HF"))
+mus_pl_all
+#ggsave("../../Result/Figures/Fig2_association.pdf", mus_pl_all, width = 7, height = 11, dpi = 600)
+```
+
+
+### filter outlier samples
+```{r}
+get_outlier_plot <- function(pscore = hsp_Pscore,
+                     iscore = hsp_Iscore,
+                     tag="hsp",
+                     group_name=c("NC", "DCM", "ICM")){
+  
+  # pscore = hsp_Pscore
+  # iscore = hsp_Iscore
+  # tag <- "hsp"
+  # group_name=c("NC", "DCM", "ICM")
+
+  mdat <- subset(phen, select = c(SampleID, Group)) %>% 
+    inner_join(inner_join(pscore, iscore %>% column_to_rownames("V1") %>%
+                       dplyr::select(ImmuneScore) %>%
+                       rownames_to_column("SampleID"), 
+                     by="SampleID"), 
+            by = "SampleID") %>%
+    filter(Group%in%group_name) %>%
+    mutate(Group=factor(as.character(Group), levels = group_name)) 
+  
+
+  is_outlier <- function(x) {
+    return(x < quantile(x, 0.25) - 1.5 * IQR(x) | x > quantile(x, 0.75) + 1.5 * IQR(x))
+  }
+  
+  mdat.Glycolysis <- mdat %>% group_by(Group) %>% 
+    mutate(is_outlier=ifelse(is_outlier(Glycolysis), Glycolysis, as.numeric(NA)))
+  mdat.Glycolysis$SampleID[which(is.na(mdat.Glycolysis$is_outlier))] <- as.numeric(NA)
+  
+  mdat.GlucoseOxidation <- mdat %>% group_by(Group) %>% 
+    mutate(is_outlier=ifelse(is_outlier(GlucoseOxidation), GlucoseOxidation, as.numeric(NA)))
+  mdat.GlucoseOxidation$SampleID[which(is.na(mdat.GlucoseOxidation$is_outlier))] <- as.numeric(NA)
+  
+  mdat.FattyAcidOxidation <- mdat %>% group_by(Group) %>% 
+    mutate(is_outlier=ifelse(is_outlier(FattyAcidOxidation), FattyAcidOxidation, as.numeric(NA)))
+  mdat.FattyAcidOxidation$SampleID[which(is.na(mdat.FattyAcidOxidation$is_outlier))] <- as.numeric(NA)
+  
+  mdat.ImmuneScore <- mdat %>% group_by(Group) %>% 
+    mutate(is_outlier=ifelse(is_outlier(ImmuneScore), ImmuneScore, as.numeric(NA)))
+  mdat.ImmuneScore$SampleID[which(is.na(mdat.ImmuneScore$is_outlier))] <- as.numeric(NA)  
+
+  temp <- rbind(mdat.Glycolysis %>% dplyr::select(SampleID, Group, is_outlier, Glycolysis) %>%
+                                 mutate(Type="Glycolysis") %>% rename(Score=Glycolysis), 
+                    mdat.GlucoseOxidation %>% dplyr::select(SampleID, Group, is_outlier, GlucoseOxidation) %>%
+                                 mutate(Type="GlucoseOxidation") %>% rename(Score=GlucoseOxidation),
+                    mdat.FattyAcidOxidation %>% dplyr::select(SampleID, Group, is_outlier, FattyAcidOxidation) %>%
+                                 mutate(Type="FattyAcidOxidation") %>% rename(Score=FattyAcidOxidation), 
+                    mdat.ImmuneScore %>% dplyr::select(SampleID, Group, is_outlier, ImmuneScore) %>%
+                                 mutate(Type="ImmuneScore") %>% rename(Score=ImmuneScore)) %>%
+    mutate(Type=factor(Type, levels = colnames(mdat)[3:6])) 
+
+  
+  if(tag == "hsp"){
+    my_comparisons <- list(c(group_name[1], group_name[2]), 
+                           c(group_name[1], group_name[3]))
+    ref_color <- hsp.grp.col
+    ref_grp <- hsp.grp
+  }else{
+    my_comparisons <- list(c(group_name[1], group_name[2]), 
+                           c(group_name[3], group_name[4]),
+                           c(group_name[2], group_name[4]))
+    ref_color <- mus.grp.col
+    ref_grp <- mus.grp
+  } 
+  
+  group_color <- ref_color[pmatch(group_name, ref_grp)] 
+  
+  pl1 <-  ggplot(temp, aes(x=Group, y=Score))+
+      geom_dotplot(aes(color=Group, fill=Group), 
+                   binaxis='y', stackdir='center', dotsize = .7)+
+      # errorbar 
+      stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
+          geom="errorbar", width=0.1, size=1) +
+      # median line : crossbar  
+      stat_summary(fun=median, geom="crossbar", color="red", size=.4, width=.4)+
+      stat_compare_means(comparisons = my_comparisons,
+                         method = "wilcox.test")+
+      # outlier points
+      geom_text_repel(aes(label=SampleID), na.rm=TRUE,
+                          size = 4,
+                          max.overlaps = getOption("ggrepel.max.overlaps", default = 80),
+                          segment.linetype = 1,
+                          segment.curvature = -1e-20,
+                          box.padding = unit(0.35, "lines"),
+                          point.padding = unit(0.3, "lines"),
+                          arrow = arrow(length = unit(0.005, "npc")),
+                          color = "black",     # text color
+                          bg.color = "white", # shadow color
+                          bg.r = 0.15)+    
+      labs(x="", y="Activity score")+
+      scale_fill_manual(values = group_color)+
+      scale_color_manual(values = group_color)+
+      guides(fill=F, color=F, shape=F)+
+      facet_wrap(Type ~ ., scales = "free_y")+ 
+      theme_bw()+
+      theme(axis.title.y = element_text(face = 'bold',color = 'black', size = 14),
+            axis.title.x = element_text(face = 'bold',color = 'black', size = 14,
+                                        vjust = -1.2),
+            text = element_text(size = 8, color = "black", family = "serif"),
+            axis.text.y = element_text(face = 'bold', color = 'black', size = 10),
+            axis.text.x = element_text(face = 'bold', color = 'black', size = 12),
+            axis.line = element_line(color = "black", size = .2),
+            panel.grid = element_blank(),
+            strip.text = element_text(size = 10, face = "bold")) 
+  
+  outlier_samples <- unique(temp[!is.na(temp$SampleID), ]$SampleID)
+  plotdata <- mdat %>% filter(!SampleID%in%outlier_samples) %>%
+    tidyr::gather(key="Type", value="Score", 
+                        -c("SampleID", "Group")) %>%
+    mutate(Type=factor(Type, levels = colnames(mdat)[3:6]))
+  print(table(plotdata$Group, plotdata$Type))
+  
+  pl2 <- ggplot(plotdata, aes(x=Group, y=Score))+
+      geom_dotplot(aes(color=Group, fill=Group), 
+                   binaxis='y', stackdir='center', dotsize = .7)+
+      # errorbar 
+      stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
+          geom="errorbar", width=0.1, size=1) +
+      # median line : crossbar  
+      stat_summary(fun=median, geom="crossbar", color="red", size=.4, width=.4)+
+      stat_compare_means(comparisons = my_comparisons,
+                         method = "wilcox.test")+
+      # outlier points
+      # geom_text(aes(label=SampleID),na.rm=TRUE,nudge_y=0.05)+    
+      labs(x="", y="Activity score")+
+      scale_fill_manual(values = group_color)+
+      scale_color_manual(values = group_color)+
+      guides(fill=F, color=F, shape=F)+
+      facet_wrap(Type ~ ., scales = "free_y")+ 
+      theme_bw()+
+      theme(axis.title.y = element_text(face = 'bold',color = 'black', size = 14),
+            axis.title.x = element_text(face = 'bold',color = 'black', size = 14,
+                                        vjust = -1.2),
+            text = element_text(size = 8, color = "black", family = "serif"),
+            axis.text.y = element_text(face = 'bold', color = 'black', size = 10),
+            axis.text.x = element_text(face = 'bold', color = 'black', size = 12),
+            axis.line = element_line(color = "black", size = .2),
+            panel.grid = element_blank(),
+            strip.text = element_text(size = 10, face = "bold")) 
+  
+  # remained samples 
+  phen_remain <- phen %>% filter(SampleID%in%unique(plotdata$SampleID))
+  
+  res <- list(outlierpl=pl1, rmpl=pl2, phen=phen_remain)
+  
+  return(res)  
+}
+```
+
+
+### Human
+```{r, fig.width=8, fig.height=8}
+hsp_outlier <- get_outlier_plot(pscore = hsp_Pscore,
+                           iscore = hsp_Iscore,
+                           tag = "hsp",
+                           group_name=c("NC", "DCM", "ICM"))
+
+# outlier plot 
+hsp_outlier$outlierpl
+
+# removed outlier plot 
+hsp_outlier$outlierpl
+
+
+write.csv(hsp_outlier$phen, "../../Result/Phenotype/phenotype_bulk_hsp_remain.csv", row.names = F)
+
+#ggsave("../../Result/Figures/Fig2_association.pdf", hsp_outlier$rmpl, width = 7, height = 11, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

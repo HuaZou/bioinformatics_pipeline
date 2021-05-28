@@ -1,0 +1,111 @@
+---
+title: "correlation"
+date: "Created:2020-8-5 Modified: 2020-8-5"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+
+grp <- c("TAC", "TAC_NC", "HF", "HF_NC", "MI", "MI_NC", "STZT1D", "STZT1D_NC")
+grp.col <- c("#283891", "#EED3AC", "#C1272D", "#9DCEDC", "#ED1C24", "#9DCEDC", "#F89C31", "#B6B6BA")
+
+btc <- c("b1", "b2", "novo", "public")
+btc.col <- c("#EE2B2B", "#BCD74B", "#6DC06A", "#2D6BB4")
+```
+
+
+### load data 
+```{r}
+kallisto_TPM_prof <- fread("../../Result/Profile/kallisto_filtered_TPM.tsv") %>% 
+  column_to_rownames("V1")
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20200716.csv") 
+
+# DEgene_list
+HF_TAC_mul_up <- read.csv("../../Result/Profile/kallisto_novo_TAC_HF_DGE/HF_TAC_mul_up.csv")
+```
+
+
+### expressionset function
+```{r}
+get_cor_value <- function(y, 
+                          gene_list=HF_TAC_mul_up, 
+                          group_col=c("HF", "TAC"), 
+                          batch="novo"){
+  # y <- prof
+  # gene_list=HF_TAC_mul_up
+  # group_col=c("HF", "TAC")
+  # batch="novo"
+  
+  
+  phe <- phen %>% filter(Batch%in%batch) %>%
+    filter(Group%in%group_col)
+  sid <- intersect(phe$SampleID_v2, colnames(y))
+  phes <- phe %>% filter(SampleID_v2%in%sid)
+  prf <- y %>% dplyr::select(as.character(phes$SampleID_v2)) %>%
+    rownames_to_column("tmp") %>% 
+    filter(tmp%in%gene_list$ENSEMBL) %>%
+    column_to_rownames("tmp")
+  
+  # change ensemble id into symbol
+  require(org.Mm.eg.db)
+  require(clusterProfiler)
+  gene.df <- bitr(rownames(prf), fromType = "ENSEMBL",
+          toType = c("ENSEMBL", "SYMBOL"),
+          OrgDb = org.Mm.eg.db)
+  mdat <- inner_join(gene.df, 
+                     prf %>% rownames_to_column("ENSEMBL"),
+                     by = "ENSEMBL") %>%
+    dplyr::select(-ENSEMBL) %>%
+    column_to_rownames("SYMBOL") %>%
+    t()
+  
+  res <- Hmisc::rcorr(mdat, type = "spearman") 
+  return(res)
+}
+
+get_cor_plot <- function(corres,
+                         start=1, 
+                         end=20){
+  # corres=HF_TAC_mul_up_cor
+  
+  dat_rho <- round(corres$r %>% data.frame(), 2) %>%
+        dplyr::slice(c(start:end)) %>%
+        as.matrix() 
+  dat_p <- round(corres$P %>% data.frame(), 2) %>%
+        dplyr::slice(c(start:end)) %>%
+        as.matrix()  
+  
+  require(corrplot)
+  corrplot(dat_rho, 
+           method = 'square', 
+           type = 'lower', 
+           p.mat = dat_p, 
+           sig.level = 0.05, 
+           #insig = 'label_sig', 
+           insig = 'blank',
+           addCoef.col = 'black', 
+           diag = FALSE, 
+           number.cex = 0.8, 
+           tl.cex = 0.8)
+}
+```
+
+### HF_TAC_mul_up 
+```{r, fig.width=8, fig.height=8}
+HF_TAC_mul_up_cor <- get_cor_value(kallisto_TPM_prof, gene_list=HF_TAC_mul_up,
+                                   group_col=c("HF", "TAC"))
+dim(HF_TAC_mul_up_cor$r)
+
+get_cor_plot(HF_TAC_mul_up_cor, start = 1, end = 20)
+```
+
+### version
+```{r}
+sessionInfo()
+```

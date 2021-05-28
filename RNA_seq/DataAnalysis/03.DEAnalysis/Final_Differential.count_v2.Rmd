@@ -1,0 +1,96 @@
+---
+title: "Differential Gene Expression analysis Combination"
+date: "Created: 2021-03-29 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## Introduction
+
+Combine all the DEGs from all compared groups
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(hash)
+```
+
+
+### load data
+
+1. Human: the number of samples (n=197)
+
+  * NC:  69
+  
+  * DCM: 63
+  
+  * ICM: 65
+  
+  * HCM: 8
+  
+  * NICM: 20 
+
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+  
+  * HF: 25
+
+### Read the DEGs' data 
+```{r}
+Hsp_DCM_NC_Diffgene <- read.csv("../../Result/Differential/final/Hsp_DCM_NC_Diffgene.csv") %>% filter(!Enrichment %in% "Nonsignif")
+Hsp_ICM_NC_Diffgene <- read.csv("../../Result/Differential/final/Hsp_ICM_NC_Diffgene.csv") %>% filter(!Enrichment %in% "Nonsignif")
+Hsp_HCM_NC_Diffgene <- read.csv("../../Result/Differential/final/Hsp_HCM_NC_Diffgene.csv") %>% filter(!Enrichment %in% "Nonsignif")
+Hsp_NICM_NC_Diffgene <- read.csv("../../Result/Differential/final/Hsp_NICM_NC_Diffgene.csv") %>% filter(!Enrichment %in% "Nonsignif")
+
+Mus_TAC_NC_Diffgene <- read.csv("../../Result/Differential/final/Mus_TAC_NC_Diffgene.csv") %>% filter(!Enrichment %in% "Nonsignif")
+Mus_HF_NC_Diffgene <- read.csv("../../Result/Differential/final/Mus_HF_NC_Diffgene.csv") %>% filter(!Enrichment %in% "Nonsignif")
+Mus_TAC_HF_Diffgene <- read.csv("../../Result/Differential/final/Mus_TAC_HF_Diffgene.csv") %>% filter(!Enrichment %in% "Nonsignif")
+```
+### Build hashes
+```{r}
+h_Hsp_DCM_NC <- hash(Hsp_DCM_NC_Diffgene$GeneID, Hsp_DCM_NC_Diffgene$Enrichment)
+h_Hsp_ICM_NC <- hash(Hsp_ICM_NC_Diffgene$GeneID, Hsp_ICM_NC_Diffgene$Enrichment)
+h_Hsp_HCM_NC <- hash(Hsp_HCM_NC_Diffgene$GeneID, Hsp_HCM_NC_Diffgene$Enrichment)
+h_Hsp_NICM_NC <- hash(Hsp_NICM_NC_Diffgene$GeneID, Hsp_NICM_NC_Diffgene$Enrichment)
+h_Mus_TAC_NC <- hash(Mus_TAC_NC_Diffgene$GeneID, Mus_TAC_NC_Diffgene$Enrichment)
+h_Mus_HF_NC <- hash(Mus_HF_NC_Diffgene$GeneID, Mus_HF_NC_Diffgene$Enrichment)
+h_Mus_TAC_HF <- hash(Mus_TAC_HF_Diffgene$GeneID, Mus_TAC_HF_Diffgene$Enrichment)
+```
+### Build the combined matrix
+```{r}
+allGenes <- Reduce(union,  list(Hsp_DCM_NC_Diffgene$GeneID,
+                               Hsp_ICM_NC_Diffgene$GeneID,
+                               Hsp_HCM_NC_Diffgene$GeneID,
+                               Hsp_NICM_NC_Diffgene$GeneID,
+                               Mus_TAC_NC_Diffgene$GeneID,
+                               Mus_HF_NC_Diffgene$GeneID,
+                               Mus_TAC_HF_Diffgene$GeneID))
+
+comb_mtr <- matrix(data = NA, nrow = length(allGenes), ncol = 7) %>%
+  data.frame()
+colnames(comb_mtr) <- c("Hsp_DCM_NC","Hsp_ICM_NC","Hsp_HCM_NC","Hsp_NICM_NC",
+                        "Mus_TAC_NC","Mus_HF_NC","Mus_TAC_HF")
+rownames(comb_mtr) <- allGenes
+for(i in 1:length(allGenes)){
+  # i = 2
+  g = allGenes[i]
+  if(!is.null(h_Hsp_DCM_NC[[g]])){comb_mtr[i,1] = h_Hsp_DCM_NC[[g]]}
+  if(!is.null(h_Hsp_ICM_NC[[g]])){comb_mtr[i,2] = h_Hsp_ICM_NC[[g]]}
+  if(!is.null(h_Hsp_HCM_NC[[g]])){comb_mtr[i,3] = h_Hsp_HCM_NC[[g]]}
+  if(!is.null(h_Hsp_NICM_NC[[g]])){comb_mtr[i,4] = h_Hsp_NICM_NC[[g]]}
+  if(!is.null(h_Mus_TAC_NC[[g]])){comb_mtr[i,5] = h_Mus_TAC_NC[[g]]}
+  if(!is.null(h_Mus_HF_NC[[g]])){comb_mtr[i,6] = h_Mus_HF_NC[[g]]}
+  if(!is.null(h_Mus_TAC_HF[[g]])){comb_mtr[i,7] = h_Mus_TAC_HF[[g]]}
+}
+write.csv(comb_mtr %>% rownames_to_column("GeneID"),
+          "../../Result/Differential/final/combined_DEGs.csv",
+          quote = F,row.names = F)
+```

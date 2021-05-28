@@ -1,0 +1,741 @@
+---
+title: "Pre-Processing all the raw counts profile"
+date: "Created: 2021-01-18 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(data.table)
+library(tibble)
+library(convert)
+library(ggplot2)
+
+library(limma)
+library(edgeR)
+library(snm)
+library(gbm)
+
+# rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+
+colors <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A",
+             "#993116", "#6798CE", "#146666", "#CE9924", "#6D659D",
+             "#9F9B27", "#C80b8A", "#2C3A89")
+```
+
+
+## Introduction
+
+Before doing data analysis, we need preprocess the counts matrix through follow procedures:
+
+* Firstly, removing the gene futures having zero value in more than 20%  per dataset(human and musculus);
+
+* Secondly, removing the batch effects because of the different data resources
+
+* Finaly, Converting the ensmbleid into gene symbol
+
+
+### gene annotation files 
+
+First and foremost, we need get the gene annotation files for filtering the non-gene RNA via descriptions
+```{r}
+if(0){
+library(biomaRt)
+library(curl)
+
+get_description <- function(genelist=mus_genelist,
+                            kind="mouse"){
+  
+  # genelist=hsp_genelist
+  # kind="human"
+  
+  filename <- paste0("../../Result/GeneID/", kind, "_mart.RData")
+  
+  if(file.exists(filename)){
+    load(filename)
+  }else{
+    if(kind == "mouse"){
+      mouse_mart <- useMart(host="www.ensembl.org",
+                            biomart="ENSEMBL_MART_ENSEMBL",
+                            dataset="mmusculus_gene_ensembl")
+      mouse_gene_all <- getBM(attributes=c("ensembl_gene_id", 
+                                         "entrezgene_id",
+                                         "external_gene_name", 
+                                         "ensembl_transcript_id", 
+                                         "ensembl_transcript_id_version",
+                                         "transcript_biotype", 
+                                         "description"),
+                            filters="ensembl_gene_id",
+                            values = genelist$Geneid,
+                            mart=mouse_mart)
+    save(mouse_mart, mouse_gene_all, file = filename)
+    write.table(mouse_gene_all, "../../Result/GeneID/mouse_gene_all.tsv", 
+              quote = F, sep = "\t", row.names = F)
+    }else{
+      human_mart <- useMart(host="www.ensembl.org", 
+                       biomart="ENSEMBL_MART_ENSEMBL", 
+                       dataset = "hsapiens_gene_ensembl")
+      human_gene_all <- getBM(attributes=c("ensembl_gene_id", 
+                                           "entrezgene_id",
+                                           "external_gene_name", 
+                                           "ensembl_transcript_id", 
+                                           "ensembl_transcript_id_version",
+                                           "transcript_biotype", 
+                                           "description"),
+                              filters = "ensembl_gene_id",
+                              values = genelist$Geneid,
+                              mart = human_mart)
+      save(human_mart, human_gene_all, file = filename)
+      write.table(human_gene_all, "../../Result/GeneID/human_gene_all.tsv", 
+              quote = F, sep = "\t", row.names = F)
+    }
+  }
+}  
+
+get_convert_mus2hsp <- function(genelist=mus_description){
+  
+  # genelist=mus_description
+  
+  load("../../Result/GeneID/mouse_mart.RData")
+  load("../../Result/GeneID/human_mart.RData")
+  
+  true_genelist <- genelist %>% filter(transcript_biotype == "protein_coding")
+  # convert mouse gene symbol into human gene symbol for gene-set enrichment analysis
+  convert_genelist <- getLDS(attributes = c("ensembl_gene_id", "external_gene_name", "description"),
+                            filters = "ensembl_gene_id",
+                            values = true_genelist$ensembl_gene_id, 
+                            mart = mouse_mart,
+                            attributesL = c("hgnc_symbol", "ensembl_gene_id"),
+                            martL = human_mart,
+                            uniqueRows = T) %>% 
+    setNames(c("ensembl_id_mouse", "gene_symbol", "description", "HGNC_symbol", "ensembl_id_human")) %>%
+    dplyr::select(c("ensembl_id_mouse", "gene_symbol", "HGNC_symbol", "ensembl_id_human", "description"))
+  
+  convert_genelist.cln <- convert_genelist[-which(convert_genelist$HGNC_symbol==""), ] 
+  
+  write.table(convert_genelist.cln, "../../Result/GeneID/gene_mouse2human.tsv", 
+              quote = F, sep = "\t", row.names = F) 
+}
+
+mus_genelist <- read.table("../../Result/GeneID/Mus_musculus.GRCm38_release100_genelist.tsv", header = T)
+hsp_genelist <- read.table("../../Result/GeneID/Homo_sapiens.GRCh38.101.genelength.tsv", header = T)
+
+# run get gene symbol
+get_description(genelist = mus_genelist, kind = "mouse")
+get_description(genelist = hsp_genelist, kind = "human")
+
+# run convert 
+mus_description <- fread("../../Result/GeneID/mouse_gene_all.tsv")
+get_convert_mus2hsp(genelist = mus_description)
+}
+```
+
+
+### load data 
+
+All the count profiles were generated by **Hisat2** and **Stringtie** workflow.
+
+* 8 human bulk RNA-seq dataset
+
+* 4 musculus bulk RNA-seq dataset 
+
+* gene annotation file
+
+
+```{r}
+# human count profile
+hsp_GSE116250 <- fread("../../Result/Profile/bulkRNA/hsp_GSE116250_stringtie_counts.csv")
+hsp_GSE120852 <- fread("../../Result/Profile/bulkRNA/hsp_GSE120852_stringtie_counts.csv")
+hsp_GSE133054 <- fread("../../Result/Profile/bulkRNA/hsp_GSE133054_stringtie_counts.csv")
+hsp_GSE135055 <- fread("../../Result/Profile/bulkRNA/hsp_GSE135055_stringtie_counts.csv")
+hsp_GSE147236 <- fread("../../Result/Profile/bulkRNA/hsp_GSE147236_stringtie_counts.csv")
+hsp_GSE46224 <- fread("../../Result/Profile/bulkRNA/hsp_GSE46224_stringtie_counts.csv")
+hsp_GSE48166 <- fread("../../Result/Profile/bulkRNA/hsp_GSE48166_stringtie_counts.csv")
+hsp_GSE57344 <- fread("../../Result/Profile/bulkRNA/hsp_GSE57344_stringtie_counts.csv")
+
+# musculus count profile
+mus_GSE133054 <- fread("../../Result/Profile/bulkRNA/mus_GSE133054_stringtie_counts.csv")
+mus_GSE29446 <- fread("../../Result/Profile/bulkRNA/mus_GSE29446_stringtie_counts.csv")
+mus_GSE66630 <- fread("../../Result/Profile/bulkRNA/mus_GSE66630_stringtie_counts.csv")
+mus_self <- fread("../../Result/Profile/bulkRNA/mus_self_stringtie_counts.csv")
+
+# phenotype 
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20210118.csv")
+
+# gene annotation
+mouse_gene <- fread("../../Result/GeneID/mouse_gene_all.tsv")
+human_gene <- fread("../../Result/GeneID/human_gene_all.tsv")
+
+# input file list
+hsp.prf.lst <- list(hsp_GSE116250, hsp_GSE120852, hsp_GSE133054, hsp_GSE135055, 
+                    hsp_GSE147236, hsp_GSE46224, hsp_GSE48166, hsp_GSE57344)
+mus.prf.lst <- list(mus_GSE133054, mus_GSE29446, mus_GSE66630, mus_self)
+```
+
+
+### Curating all the profiles 
+
+the following scripts comprise of several functions: filtering features, removing batch effects and visualizing  
+
+  1. the transcript_biotype of gene descripted *protein_coding* would be remained
+
+  2. the feature of occurrence less than 0.2
+  
+  3. the feature of total counts more than 10 
+  
+  4. the unique number of feature(Avoid the constant expression value per gene) 
+  
+```{r}
+# filtering 
+get_filter_prf <- function(x=phen, 
+                           y=hsp.prf.lst,
+                           kind="mouse",
+                           uniq=2, 
+                           occurrence=0.2,
+                           ncount=10){
+  
+  # x=phen
+  # y=mus.prf.lst
+  # kind="mouse"
+  # occurrence=0.2
+  # uniq=2
+  # ncount=10
+  
+  prof <- y[[1]]
+  for(i in 2:length(y)){
+    prof <- inner_join(prof, y[[i]], by="gene_id")
+  }
+  prof$gene_id <- gsub("\\|\\S+", "", prof$gene_id)
+  
+  if(kind == "mouse"){
+    gene_list <- mouse_gene %>% filter(transcript_biotype == "protein_coding") 
+  }else{
+    gene_list <- human_gene %>% filter(transcript_biotype == "protein_coding") 
+  }
+  
+  gene_sid <- intersect(gene_list$ensembl_gene_id, prof$gene_id)
+  gene_list_filter <- gene_list %>% filter(ensembl_gene_id %in% gene_sid)
+  prf <- prof %>% filter(gene_id%in%as.character(gene_sid)) %>% 
+    column_to_rownames("gene_id")
+  
+  sid <- intersect(x$SampleID, colnames(prf))
+  
+  # phenotype
+  phe <- x %>% filter(SampleID%in%sid) %>%
+    mutate(Batch=factor(as.character(Batch)),
+           Group=factor(as.character(Group))) %>%
+    mutate(batch_number=as.numeric(Batch)) %>%
+    column_to_rownames("SampleID") 
+  
+  # profile by occurrence
+  prf_occ <- prf %>% rownames_to_column("tmp") %>% 
+    filter(apply(dplyr::select(., -one_of("tmp")), 1, function(x) {
+            sum(x != 0)/length(x)}) > occurrence) %>%
+    dplyr::select(c(tmp, rownames(phe))) %>%
+    column_to_rownames("tmp")
+  
+  # filter profile by unique  
+  prf_uniq_number <- apply(prf_occ, 1, function(x){length(unique(x[x > 0]))}) %>% 
+    data.frame() %>% setNames("number")
+  remain_genes <- prf_uniq_number %>% filter(number > uniq)
+  
+  prf_count <- prf_occ[rowSums(prf_occ) > ncount, ]
+  prf_final <- prf_count[rownames(prf_count)%in%rownames(remain_genes), ]
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prf_final)){ 
+    if (!(colnames(prf_final)[i] == rownames(phe)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  print(table(phe$Batch, phe$Group))
+  
+  exprs <- as.matrix(prf_final)
+  adf <-  new("AnnotatedDataFrame", data=phe)
+  experimentData <- new("MIAME",
+        name="ShuiLin Liao", lab="Dong gdl Lab",
+        contact="dong_ming@grmh-gdl.cn",
+        title="Heart-failure Experiment",
+        abstract="The gene ExpressionSet",
+        url="www.grmh-gdl.cn",
+        other=list(notes="Created from text files"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  
+  return(expressionSet)
+}
+```
+
+
+* Plotting the results based on PCA
+```{r}
+# visualization
+pca_fun <- function(expers_set=hsp.set){
+  
+  # expers_set=hsp.set
+  
+  pheno <- pData(expers_set)
+  edata <- exprs(expers_set)
+  pca <- prcomp(t(edata), scale. = TRUE, center = T)
+  score <- inner_join(pca$x %>% data.frame() %>% 
+                        rownames_to_column("SampleID")  %>%  
+                        dplyr::select(c(1:3)) , 
+                        pheno %>% rownames_to_column("SampleID"),
+                      by = "SampleID")
+
+  pl <- ggplot(score, aes(x=PC1, y=PC2))+
+          geom_point(aes(color=Batch), size=3.5)+
+          guides(color=guide_legend(title=NULL,keywidth=.7, keyheight=.7))+
+          scale_color_manual(values = colors)+
+          theme_bw()+
+          theme(axis.title = element_text(size=10, color="black", face="bold"),
+                axis.text = element_text(size=9, color="black"),
+                text = element_text(size=8, color="black", family="serif"),
+                strip.text = element_text(size=9, color="black", face="bold", family="serif"), 
+                panel.grid = element_blank(),
+                legend.text=element_text(size=11, color = "black", family="serif"),
+                legend.background = element_rect(color = "black", fill="white"))
+  return(pl)  
+}
+```
+
+
+* Removing batch effects via the GSE id
+```{r}
+# remove batch effect
+reduce_voom_SNM <- function(x=hsp.set){
+  
+  # x=hsp.set
+
+  qcMetadata <- pData(x) # ADAPT THIS AS NEEDED
+  qcData <- t(exprs(x))   # ADAPT THIS AS NEEDED
+    
+  # Set up design matrix
+  covDesignNorm <- model.matrix(~0 + Batch + Group, 
+                                      data = qcMetadata)
+  
+  # Check row dimensions
+  dim(covDesignNorm)[1] == dim(qcData)[1]
+    
+  print(colnames(covDesignNorm))
+  # The following corrects for column names that are incompatible with downstream processing
+  colnames(covDesignNorm) <- gsub('([[:punct:]])|\\s+','',colnames(covDesignNorm))
+  print(colnames(covDesignNorm))
+    
+  # Set up counts matrix
+  counts <- t(qcData) # DGEList object from a table of counts (rows=features, columns=samples)
+    
+  # Quantile normalize and plug into voom
+  dge <- DGEList(counts = counts)
+  vdge <- voom(dge, design = covDesignNorm, plot = TRUE, save.plot = TRUE, 
+                                                normalize.method="none")
+    
+  # List biological and normalization variables in model matrices
+  bio.var <- model.matrix(~Group,
+                            data=qcMetadata)
+  colnames(bio.var) <- gsub('([[:punct:]])|\\s+','',colnames(bio.var))
+  
+  
+  adj.var <- model.matrix(~Batch,
+                            data=qcMetadata)
+  colnames(adj.var) <- gsub('([[:punct:]])|\\s+','',colnames(adj.var))
+  
+  print(dim(adj.var))
+  print(dim(bio.var))
+  print(dim(t(vdge$E)))
+  print(dim(covDesignNorm))
+    
+  snmDataObjOnly <- snm(raw.dat = vdge$E, 
+                        bio.var = bio.var, 
+                        adj.var = adj.var, 
+                        rm.adj=TRUE,
+                        verbose = TRUE,
+                        diagnose = TRUE)
+  snmData <- snmDataObjOnly$norm.dat
+  
+  exprs <- as.matrix(snmData)
+  print(dim(exprs))
+  adf <-  new("AnnotatedDataFrame", data=qcMetadata)
+  experimentData <- new("MIAME",
+        name="ShuiLin Liao", lab="Dong gdl Lab",
+        contact="dong_ming@grmh-gdl.cn",
+        title="Heart-failure Experiment",
+        abstract="The gene ExpressionSet",
+        url="www.grmh-gdl.cn",
+        other=list(notes="ajusted counts by removeBatchEffect"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  return(expressionSet)
+}
+```
+
+
+### Homo sapiens profiles
+
+* calculating
+```{r}
+hsp.set <- get_filter_prf(y = hsp.prf.lst, uniq = 2, occurrence = 0.2, ncount = 10, kind="human")
+hsp.set.VoomSNM <- reduce_voom_SNM(x = hsp.set)
+```
+
+* plotting 
+```{r, fig.width=14, fig.height=6}
+if(!dir.exists("../../Result/Profile/final/")){
+  dir.create("../../Result/Profile/final/")
+}
+cowplot::plot_grid(pca_fun(expers_set = hsp.set), 
+                   pca_fun(expers_set = hsp.set.VoomSNM), 
+                   ncol = 2,
+                   labels = c("origin", "VoomSNM"))
+
+saveRDS(hsp.set, "../../Result/Profile/final/Homo_sapiens_ExprSet_filtered.RDS", compress = TRUE)
+saveRDS(hsp.set.VoomSNM, "../../Result/Profile/final/Homo_sapiens_ExprSet_VoomSNM.RDS", compress = TRUE)
+```
+
+
+### Mus musculus profiles
+
+* calculating
+```{r}
+mus.set <- get_filter_prf(y = mus.prf.lst, uniq = 2, occurrence = 0.2, ncount = 10, kind = "mouse")
+mus.set.VoomSNM <- reduce_voom_SNM(x = mus.set)
+```
+
+* plotting 
+```{r, fig.width=14, fig.height=6}
+if(!dir.exists("../../Result/Profile/final/")){
+  dir.create("../../Result/Profile/final/")
+}
+
+cowplot::plot_grid(pca_fun(expers_set = mus.set), 
+                   pca_fun(expers_set = mus.set.VoomSNM), 
+                   ncol = 2,
+                   labels = c("origin", "VoomSNM"))
+
+saveRDS(mus.set, "../../Result/Profile/final/Mus_musculus_ExprSet_filtered.RDS", compress = TRUE)
+saveRDS(mus.set.VoomSNM, "../../Result/Profile/final/Mus_musculus_ExprSet_VoomSNM.RDS", compress = TRUE)
+```
+
+
+### The total number of samples per species 
+
+1. Human: the number of samples (n=227)
+
+  * NC: 70 
+  
+  * DCM: 64 
+  
+  * HCM: 8
+  
+  * ICM: 65
+  
+  * NICM: 20 
+  
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+  
+  * TAC: 22 
+  
+  * HF_NC: 18
+  
+  * HF: 25
+  
+  
+
+### 20210322
+
+**Supplementary Figure1** : The Voom_SNM algorith for removing batch effects
+```{r}
+require(patchwork)
+
+hsp.pl.old <- pca_fun(expers_set = hsp.set)
+hsp.pl.voomsnm <- pca_fun(expers_set = hsp.set.VoomSNM)
+mmus.pl.old <- pca_fun(expers_set = mus.set)
+mmus.pl.voomsnm <- pca_fun(expers_set = mus.set.VoomSNM)
+
+Rm_batch_pl <- (hsp.pl.old | hsp.pl.voomsnm) / (mmus.pl.old | mmus.pl.voomsnm)+
+  plot_layout(guides = "collect")+
+  plot_annotation(tag_levels = c("A", "2"))
+
+if(!dir.exists("../../Result/Figures/version_210322/")){
+  dir.create("../../Result/Figures/version_210322/")
+}
+
+ggsave(filename = "../../Result/Figures/version_210322/SFig1.pdf", Rm_batch_pl, width = 10, height = 6.5)
+```
+
+
+### 20210408
+
+Discarding the post-LAVD ICM samples because LAVD had effects on the heart status.
+
+```{r}
+# human count profile
+hsp_GSE116250 <- fread("../../Result/Profile/bulkRNA/hsp_GSE116250_stringtie_counts.csv")
+hsp_GSE120852 <- fread("../../Result/Profile/bulkRNA/hsp_GSE120852_stringtie_counts.csv")
+hsp_GSE133054 <- fread("../../Result/Profile/bulkRNA/hsp_GSE133054_stringtie_counts.csv")
+hsp_GSE135055 <- fread("../../Result/Profile/bulkRNA/hsp_GSE135055_stringtie_counts.csv")
+hsp_GSE147236 <- fread("../../Result/Profile/bulkRNA/hsp_GSE147236_stringtie_counts.csv")
+hsp_GSE46224 <- fread("../../Result/Profile/bulkRNA/hsp_GSE46224_stringtie_counts.csv")
+hsp_GSE48166 <- fread("../../Result/Profile/bulkRNA/hsp_GSE48166_stringtie_counts.csv")
+hsp_GSE57344 <- fread("../../Result/Profile/bulkRNA/hsp_GSE57344_stringtie_counts.csv")
+
+# musculus count profile
+mus_GSE133054 <- fread("../../Result/Profile/bulkRNA/mus_GSE133054_stringtie_counts.csv")
+mus_GSE29446 <- fread("../../Result/Profile/bulkRNA/mus_GSE29446_stringtie_counts.csv")
+mus_GSE66630 <- fread("../../Result/Profile/bulkRNA/mus_GSE66630_stringtie_counts.csv")
+mus_self <- fread("../../Result/Profile/bulkRNA/mus_self_stringtie_counts.csv")
+
+# phenotype 
+# phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20210118.csv")
+phen_v2 <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20210408.csv")
+
+# gene annotation
+mouse_gene <- fread("../../Result/GeneID/mouse_gene_all.tsv")
+human_gene <- fread("../../Result/GeneID/human_gene_all.tsv")
+
+hsp.prf.lst <- list(hsp_GSE116250, hsp_GSE120852, hsp_GSE133054, hsp_GSE135055, 
+                    hsp_GSE147236, hsp_GSE46224, hsp_GSE48166, hsp_GSE57344)
+mus.prf.lst <- list(mus_GSE133054, mus_GSE29446, mus_GSE66630, mus_self)
+```
+
+#### Function
+```{r}
+# filtering 
+get_filter_prf_v2 <- function(x=phen_v2, 
+                           y=hsp.prf.lst,
+                           kind="human",
+                           uniq=2, 
+                           occurrence=0.2,
+                           ncount=10){
+  
+  # x=phen_v2
+  # y=hsp.prf.lst
+  # kind="human"
+  # occurrence=0.2
+  # uniq=2
+  # ncount=10
+  
+  if(!any(is.element(colnames(x), "Phenotype"))){
+    stop('Phenotype column is required. Please check it.')
+  }
+  
+  prof <- y[[1]]
+  for(i in 2:length(y)){
+    prof <- inner_join(prof, y[[i]], by="gene_id")
+  }
+  prof$gene_id <- gsub("\\|\\S+", "", prof$gene_id)
+  
+  if(kind == "mouse"){
+    gene_list <- mouse_gene %>% filter(transcript_biotype == "protein_coding") 
+  }else{
+    gene_list <- human_gene %>% filter(transcript_biotype == "protein_coding") 
+  }
+  
+  gene_sid <- intersect(gene_list$ensembl_gene_id, prof$gene_id)
+  gene_list_filter <- gene_list %>% filter(ensembl_gene_id %in% gene_sid)
+  prf <- prof %>% filter(gene_id%in%as.character(gene_sid)) %>% 
+    column_to_rownames("gene_id")
+  
+  sid <- intersect(x$SampleID, colnames(prf))
+  
+  # phenotype
+  phe <- x %>% filter(SampleID%in%sid) %>%
+    mutate(Batch=factor(as.character(Batch)),
+           Group=factor(as.character(Group))) %>%
+    mutate(batch_number=as.numeric(Batch)) %>%
+    column_to_rownames("SampleID") 
+  
+  # filter post-LVAD
+  if(any(is.element(unique(phe$Phenotype), "Post-LVAD"))){
+    phe.cln <- phe %>% filter(Phenotype != "Post-LVAD")
+    sid2 <- intersect(phe.cln$SampleID, colnames(prf))
+    #prf.cln <- prf %>% dplyr::select(rownames(phe.cln))
+  }else{
+    phe.cln <- phe
+    sid2 <- sid 
+    # prf.cln <- prf
+  } 
+  
+  # profile by occurrence
+  prf_occ <- prf %>% rownames_to_column("tmp") %>% 
+    filter(apply(dplyr::select(., -one_of("tmp")), 1, function(x) {
+            sum(x != 0)/length(x)}) > occurrence) %>%
+    dplyr::select(c(tmp, rownames(phe.cln))) %>%
+    column_to_rownames("tmp")
+  
+  # filter profile by unique  
+  prf_uniq_number <- apply(prf_occ, 1, function(x){length(unique(x[x > 0]))}) %>% 
+    data.frame() %>% setNames("number")
+  remain_genes <- prf_uniq_number %>% filter(number > uniq)
+  
+  prf_count <- prf_occ[rowSums(prf_occ) > ncount, ]
+  prf_final <- prf_count[rownames(prf_count)%in%rownames(remain_genes), ]
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prf_final)){ 
+    if (!(colnames(prf_final)[i] == rownames(phe.cln)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  print(table(phe$Batch, phe$Group))
+  
+  exprs <- as.matrix(prf_final)
+  adf <-  new("AnnotatedDataFrame", data=phe.cln)
+  experimentData <- new("MIAME",
+        name="ShuiLin Liao", lab="Dong gdl Lab",
+        contact="dong_ming@grmh-gdl.cn",
+        title="Heart-failure Experiment",
+        abstract="The gene ExpressionSet",
+        url="www.grmh-gdl.cn",
+        other=list(notes="Created from text files"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  
+  return(expressionSet)
+}
+
+# visualization
+pca_fun <- function(expers_set=hsp.set){
+  
+  # expers_set=hsp.set
+  
+  pheno <- pData(expers_set)
+  edata <- exprs(expers_set)
+  pca <- prcomp(t(edata), scale. = TRUE, center = T)
+  score <- inner_join(pca$x %>% data.frame() %>% 
+                        rownames_to_column("SampleID")  %>%  
+                        dplyr::select(c(1:3)) , 
+                        pheno %>% rownames_to_column("SampleID"),
+                      by = "SampleID")
+
+  pl <- ggplot(score, aes(x=PC1, y=PC2))+
+          geom_point(aes(color=Batch), size=3.5)+
+          guides(color=guide_legend(title=NULL,keywidth=.7, keyheight=.7))+
+          scale_color_manual(values = colors)+
+          theme_bw()+
+          theme(axis.title = element_text(size=10, color="black", face="bold"),
+                axis.text = element_text(size=9, color="black"),
+                text = element_text(size=8, color="black", family="serif"),
+                strip.text = element_text(size=9, color="black", face="bold", family="serif"), 
+                panel.grid = element_blank(),
+                legend.text=element_text(size=11, color = "black", family="serif"),
+                legend.background = element_rect(color = "black", fill="white"))
+  return(pl)  
+}
+
+# remove batch effect
+reduce_voom_SNM_v2 <- function(x=hsp.set_v2){
+  
+  x=hsp.set_v2
+
+  qcMetadata <- pData(x) # ADAPT THIS AS NEEDED
+  qcData <- t(exprs(x))  # ADAPT THIS AS NEEDED
+  
+  
+  # change int into character
+  if(any(is.element(colnames(qcMetadata), "AvgSpotLen"))){
+    qcMetadata$AvgSpotLen <- as.character(qcMetadata$AvgSpotLen)
+  }
+  
+  # the number of column's unique are more than one will be chosen to regard as adjust variables
+  adjust_var <- c()
+  for(i in 1:11){
+    if(length(unique(qcMetadata[, i])) > 1){
+      adjust_var <- c(adjust_var, colnames(qcMetadata)[i])
+    }
+  }
+  adjust_var_formala <- as.formula(paste("~ 0 +", paste(adjust_var, collapse = "+")))
+  # Set up design matrix
+  covDesignNorm <- model.matrix(adjust_var_formala, data = qcMetadata)
+  
+  # Check row dimensions
+  dim(covDesignNorm)[1] == dim(qcData)[1]
+    
+  print(colnames(covDesignNorm))
+  # The following corrects for column names that are incompatible with downstream processing
+  colnames(covDesignNorm) <- gsub('([[:punct:]])|\\s+','',colnames(covDesignNorm))
+  print(colnames(covDesignNorm))
+    
+  # Set up counts matrix
+  counts <- t(qcData) # DGEList object from a table of counts (rows=features, columns=samples)
+    
+  # Quantile normalize and plug into voom
+  dge <- DGEList(counts = counts)
+  vdge <- voom(dge, design = covDesignNorm, plot = TRUE, save.plot = TRUE, 
+                                                normalize.method="none")
+    
+  # List biological and normalization variables in model matrices
+  bio.var <- model.matrix(~ 0 + Group, data=qcMetadata)
+  colnames(bio.var) <- gsub('([[:punct:]])|\\s+','',colnames(bio.var))
+  
+  adjust_var_formala_v2 <- as.formula(paste("~", 
+                  paste(adjust_var[-which(adjust_var == "Group")], collapse = "+")))
+  adj.var <- model.matrix(adjust_var_formala_v2, data=qcMetadata)
+  colnames(adj.var) <- gsub('([[:punct:]])|\\s+','',colnames(adj.var))
+  
+  print(dim(adj.var))
+  print(dim(bio.var))
+  print(dim(t(vdge$E)))
+  print(dim(covDesignNorm))
+    
+  snmDataObjOnly <- snm(raw.dat = vdge$E, 
+                        bio.var = bio.var, 
+                        adj.var = adj.var, 
+                        rm.adj=TRUE,
+                        verbose = TRUE,
+                        diagnose = TRUE)
+  snmData <- snmDataObjOnly$norm.dat
+  
+  exprs <- as.matrix(snmData)
+  print(dim(exprs))
+  adf <-  new("AnnotatedDataFrame", data=qcMetadata)
+  experimentData <- new("MIAME",
+        name="ShuiLin Liao", lab="Dong gdl Lab",
+        contact="dong_ming@grmh-gdl.cn",
+        title="Heart-failure Experiment",
+        abstract="The gene ExpressionSet",
+        url="www.grmh-gdl.cn",
+        other=list(notes="ajusted counts by removeBatchEffect"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  return(expressionSet)
+}
+```
+
+#### Homo sapiens profiles
+
+* calculating
+```{r}
+hsp.set_v2 <- get_filter_prf_v2(x = phen_v2,
+                             y = hsp.prf.lst, 
+                             uniq = 2, 
+                             occurrence = 0.2, 
+                             ncount = 10, 
+                             kind="human")
+hsp.set.VoomSNM_v2 <- reduce_voom_SNM_v2(x = hsp.set_v2)
+```
+
+### version
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [Microbiome analyses of blood and tissues suggest cancer diagnostic approach](https://pubmed.ncbi.nlm.nih.gov/32214244/)

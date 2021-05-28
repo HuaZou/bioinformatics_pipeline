@@ -1,0 +1,475 @@
+---
+title: "hypomethylated promoters and enhancers in the probe sites and regions"
+date: "Created: 2021-05-24 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+### Introdution
+
+Promoter, the region for promoting the gene transcription, is often locate in the length of 1K at the transcription start site(TSS), such as TSS1500, TSS200 or 5'UTR, according to the **Moran S et al. Epigenomics. 2016**. *Promoter CpG island hypermethylation associated with inactivation of coding and noncoding tumor suppressor genes as well as an overall hypomethylation of the cancer genome*
+
+Enchancer, defined by the ENCODE and the FANTOM5, serves as the docking site for transcription factor binding site, is locate in the intergenic region(CpGs that are not classified into TSS, 5'UTR, body, 3'UTR and 1stExo are annotated as intergenic.
+
+  * intronic enhancers -> intronic splicing enhancers(*A pre-mRNA sequence motif of about six bases within an intron regulating enhanced/silenced splicing at a close by sequence position*)
+  
+  * distal enhancers -> distal control elements(*Distal enhancers engage in 3D structures to activate genes*)
+
+Here, We would classify the hypomethylated Promoter probes/Region and the hypomethylated Enhancer probes/regions to investigate their impacts on the gene transcriptional switches associated with tumorigenesis. 
+
+**Notice: When multiple genes or TSS were associated with a CpG site, category prioritization was applied following a 5´-prime to 3´-prime criteria (TSS200 > TSS1500 > 5´UTR > 1st Exon > Body >3´UTR > Intergenic)**
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+options(warn = -1)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ggplot2)
+options(warn = 0)
+
+# rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+```
+
+
+### Importing Data 
+```{r}
+phen <- read.csv("../../Result/phenotype/Pancreatic_tumor_merge_20210426.csv")
+
+# methylation DMPs
+DMP_PPC <- fread("../../Result/Differential/Paracancerous_PrimaryCancer_DMP.csv")
+DMP_PCL <- fread("../../Result/Differential/PrimaryCancer_Liver_DMP.csv")
+
+# methylation profile
+prf_PPC <- readRDS("../../Result/profile/Paracancerous_PrimaryCancer_MethExprSet_bVals.RDS")
+prf_PCL <- readRDS("../../Result/profile/PrimaryCancer_Liver_MethExprSet_bVals.RDS")
+
+# methylation DMRs
+# DMR_PPC <- readRDS("../../Result/Differential/Paracancerous_PrimaryCancer_DMR_bVals.RDS")
+# DMR_PCL <- readRDS("../../Result/Differential/PrimaryCancer_Liver_DMR_bVals.RDS")
+DMR_PPC <- readRDS("../../Result/Differential/Paracancerous_PrimaryCancer_DMR_bVals_v2.RDS")
+DMR_PCL <- readRDS("../../Result/Differential/PrimaryCancer_Liver_DMR_bVals_v2.RDS")
+
+# CpG probe sites annotation
+if(!file.exists("../../Result/GeneID/")){
+  library(IlluminaHumanMethylationEPICmanifest)
+  library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19) 
+  annEPIC <- getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+  saveRDS(annEPIC, "../../Result/GeneID/EPIC_annotation.RDS")   
+}else{
+  annEPIC <- readRDS("../../Result/GeneID/EPIC_annotation.RDS")
+}
+```
+
+
+### CpG island probe site annotation
+
+*Following a functional classification, 41% of the CpGs are located in proximal promoters (CpG sites located within 200 bp or 1500 bp upstream of transcription start sites, exon 1 and in 5'UTRs), 3.2% correspond to 3'UTRs, 30.9% to gene bodies and 24.6% to intergenic regions.*
+
+* proximal promoters: TSS200, TSS1500, 
+
+* 1stExon
+
+* 5'UTR
+
+* 3'UTR
+
+* gene body
+
+* intergenic regions
+
+<details>
+<summary>DNA methylation UCSC_RefGene_Group</summary>
+
+
+<p align="center">
+<img src="./images/gene_structure.jpg" width="800" height="500">
+</p>
+
+
+* **TSS200** = 0–200 bases upstream of the transcriptional start site (TSS)
+
+* **TSS1500** = 200–1500 bases upstream of the TSS
+
+* **5'UTR** = Within the 5' untranslated region, between the TSS and the ATG start site
+
+* **1st exon**
+
+* **Body** = Between the ATG and stop codon; irrespective of the presence of introns, exons, TSS, or
+promoters
+
+* **exon boundaries**
+
+* **3'UTR** = Between the stop codon and poly A signal.
+
+
+</details>
+
+
+```{r}
+get_probe_annotation <- function(annotation=annEPIC){
+  
+  # annotation=annEPIC
+  
+  dat <- data.frame(annotation)
+  
+  # category prioritization (TSS200 > TSS1500 > 5´UTR > 1st Exon > Body >3´UTR > Intergenic)
+  require(hashmap)
+  category_prior <- hashmap(c("TSS200", "TSS1500", "5'UTR", "1stExon", "Body", "ExonBnd", "3'UTR", "Intergenic"),
+                            c(1:8))
+  category_prior_reverse <- hashmap(c(1:8),
+    c("TSS200", "TSS1500", "5'UTR", "1stExon", "Body", "ExonBnd", "3'UTR", "Intergenic"))
+  dat_sub <- dat %>% dplyr::select(Name, UCSC_RefGene_Name, UCSC_RefGene_Group) #%>%
+    #dplyr::slice(1:1000)
+  
+  dat_category <- apply(dat_sub, 1, function(x){
+    
+    RefGene <- x[3]
+    RefGroup <- x[2]
+    Name <- x[1]
+    
+    refGene_name <- unlist(strsplit(RefGene, ";"))
+    refGene_order <- c()
+    for(j in 1:length(refGene_name)){
+      refGene_order <- c(refGene_order, category_prior[[refGene_name[j]]])
+    }
+    Group_final <- category_prior_reverse[[refGene_order[order(refGene_order)][1]]]
+    Gene_final <- unlist(strsplit(RefGroup, ";"))[grep(Group_final, refGene_name)[1]]
+    
+    if(is.na(Group_final)){
+      Group_final <- "Intergenic"
+    }
+    
+    res <- c(Name, Group_final, Gene_final) 
+    return(res)
+  }) %>% t() %>% data.frame() %>%
+    setNames(c("Name", "Gene_Group", "Gene_Name"))
+  
+  
+  # enhancer probe defined by the ENCODE and the FANTOM5
+  dat_enhancer_sub <- dat %>% dplyr::select(Name, Phantom4_Enhancers, Phantom5_Enhancers, X450k_Enhancer) #%>%
+    #dplyr::slice(1:1000)
+  dat_enhancer <- apply(dat_enhancer_sub, 1, function(x){
+    
+    Name <- x[1]
+    Phantom4_Enhancers <- x[2]
+    Phantom5_Enhancers <- x[3]
+    X450k_Enhancer <- x[4]
+    
+    #if(Phantom4_Enhancers != "" | Phantom5_Enhancers != "" | X450k_Enhancer != "")
+    if(Phantom5_Enhancers != "" | X450k_Enhancer != ""){
+      Enhancer <- TRUE
+    }else{
+      Enhancer <- FALSE
+    }
+    
+    res <- c(Name, Enhancer)
+    return(res)
+  }) %>% t() %>% data.frame() %>%
+    setNames(c("Name", "Enhancer"))
+  
+  res <- inner_join(dat_category, dat_enhancer, by = "Name") %>% 
+    inner_join(dat %>% dplyr::select(c(1:4, 12:19, 22:31)), 
+               by = "Name")
+  print(rbind(data.frame(RefGene_Group=names(table(res$Gene_Group)),
+                         Count=as.numeric(table(res$Gene_Group)),
+                         Percentage=paste0(signif(as.numeric(table(res$Gene_Group))/dim(res)[1], 3)*100, "%")
+              ),
+             data.frame(RefGene_Group="Sumamry",
+                        Count=dim(res)[1],
+                        Percentage="100%"
+              )
+
+          )
+    )
+  res$RefGene_subGroup <- ifelse(res$Gene_Group%in%c("TSS200", "TSS1500"), "Promoters",
+                              ifelse(res$Gene_Group%in%c("Body"), "Body",
+                                     ifelse(res$Gene_Group%in%c("3'UTR"), "3'UTR", 
+                                            ifelse(res$Gene_Group%in%c("5'UTR"), "5'UTR", 
+                                                   ifelse(res$Gene_Group%in%c("1stExon"), "1stExon", "Intergenic")
+                                           )
+                                    )
+                                ))
+  
+  print(rbind(data.frame(RefGene_subGroup=names(table(res$RefGene_subGroup)),
+                         Count=as.numeric(table(res$RefGene_subGroup)),
+                         Percentage=paste0(signif(as.numeric(table(res$RefGene_subGroup))/dim(res)[1], 3)*100, "%")
+              ),
+             data.frame(RefGene_subGroup="Sumamry",
+                        Count=dim(res)[1],
+                        Percentage="100%"
+              )
+
+          )
+    )
+  
+  return(res)
+}
+
+if(!file.exists("../../Result/GeneID/EPIC_reannotation.RDS")){
+  reannEPIC <- get_probe_annotation(annotation = annEPIC)
+  saveRDS(reannEPIC, "../../Result/GeneID/EPIC_reannotation.RDS")
+}else{
+  reannEPIC <- readRDS("../../Result/GeneID/EPIC_reannotation.RDS")  
+}
+
+# RefGene_Group
+data.frame(RefGene_Group=names(table(reannEPIC$Gene_Group)),
+           Count=as.numeric(table(reannEPIC$Gene_Group)),
+           Percentage=signif(as.numeric(table(reannEPIC$Gene_Group))/dim(reannEPIC)[1], 3)*100) %>%
+  mutate(text_y = cumsum(Percentage) - Percentage/2) %>%
+# require(ggrepel)
+ggplot(aes(x="", y=Percentage, fill=RefGene_Group))+
+  geom_bar(stat="identity", width = 1)+
+  coord_polar("y", start=0)+
+  geom_text(aes(label = paste0(RefGene_Group, "\n", paste0(Percentage, "%"))),
+            position = position_stack(vjust=0.5),
+            size=3)+
+  # geom_label_repel(aes(label = paste0(RefGene_Group, "\n", paste0(Percentage, "%")), 
+  #                      y = text_y),
+  #                  nudge_x = 1.6)+  
+  labs(x = NULL, y = NULL, fill = NULL)+
+  theme_classic()+
+  theme(axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position="none",
+        text = element_text(color = "black", family="serif"))+
+  scale_fill_brewer(palette="Blues")
+
+
+# RefGene_subGroup
+data.frame(RefGene_Group=names(table(reannEPIC$RefGene_subGroup)),
+           Count=as.numeric(table(reannEPIC$RefGene_subGroup)),
+           Percentage=signif(as.numeric(table(reannEPIC$RefGene_subGroup))/dim(reannEPIC)[1], 3)*100) %>%
+  mutate(text_y = cumsum(Percentage) - Percentage/2) %>%
+# require(ggrepel)
+ggplot(aes(x="", y=Percentage, fill=RefGene_Group))+
+  geom_bar(stat="identity", width = 1)+
+  coord_polar("y", start=0)+
+  geom_text(aes(label = paste0(RefGene_Group, "\n", paste0(Percentage, "%"))),
+            position = position_stack(vjust=0.5),
+            size=3) +
+  # geom_label_repel(aes(label = paste0(RefGene_Group, "\n", paste0(Percentage, "%")), 
+  #                      y = text_y),
+  #                  nudge_x = 1.6)+  
+  labs(x = NULL, y = NULL, fill = NULL)+
+  theme_classic()+
+  theme(axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position="none",
+        text = element_text(color = "black", family="serif"))+
+  scale_fill_brewer(palette="Blues")
+```
+
+
+### Hypomethylated probe sites
+```{r, fig.width=12, fig.height=7}
+Hypomethy_probes_distribution <- function(datset=DMP_PPC,
+                                 group_name=c("ParacancerousTissue", "PrimaryCancerTissue")){
+  
+  # datset=DMP_PPC
+  # group_name=c("ParacancerousTissue", "PrimaryCancerTissue")
+  
+  dat <- datset[, c(1:10)] %>% 
+    inner_join(reannEPIC %>% dplyr::select(Name, Gene_Group, Gene_Name, Enhancer),
+               by =c("GeneID"="Name")) 
+  
+  dat_sig <- dat %>% filter(Hypomethylated != "Nonsignif") 
+  
+  pie_plot <- function(dat_hypo=dat_hypo_grp1,
+                       group_col=group_name[1]){
+    
+    # dat_hypo=dat_hypo_grp1
+    # group_col=group_name[1]
+    
+    number <- dim(dat_hypo)[1]
+    pl <- data.frame(RefGene_Group=names(table(dat_hypo$Gene_Group)),
+               Count=as.numeric(table(dat_hypo$Gene_Group)),
+               Percentage=signif(as.numeric(table(dat_hypo$Gene_Group))/dim(dat_hypo)[1], 3)*100) %>%
+      mutate(RefGene_Group=factor(RefGene_Group, 
+              levels=c("TSS200", "TSS1500", "5'UTR", "1stExon", "Body", "ExonBnd", "Intergenic", "3'UTR"))) %>%
+    ggplot(aes(x="", y=Percentage, fill=RefGene_Group))+
+      geom_bar(stat="identity", width = 1)+
+      coord_polar("y", start=0)+
+      geom_text(aes(label = paste0(RefGene_Group, "\n", paste0(Percentage, "%"))),
+                position = position_stack(vjust=0.5),
+                size=3)+
+      labs(x = NULL, y = NULL, fill = NULL)+
+      ggtitle(paste("Hypomethylated CpG loci in", group_col, paste0("(", number, ")")))+
+      # scale_fill_brewer(palette="Blues")+  
+      scale_fill_manual(name = "Genic Region",
+                        values = c("#FF61C3", "#DB72FB", "#93AA00", "#F8766D",
+                                   "#00BA38", "#6EF1FF", "#D49200", "#619CFF"))+
+      theme_classic()+
+      theme(plot.title = element_text(color = "black", size = 8, face = "bold", hjust = .5),
+            axis.line = element_blank(),
+            axis.text = element_blank(),
+            axis.ticks = element_blank(),
+            #legend.position="none",
+            text = element_text(color = "black", family="serif"))
+    
+    return(pl)
+  }
+  
+  dat_hypo_grp1 <- dat_sig %>% filter(Hypomethylated == group_name[1])
+  pie_grp1 <- pie_plot(dat_hypo=dat_hypo_grp1,
+                       group_col=group_name[1])
+  
+  dat_hypo_grp2 <- dat_sig %>% filter(Hypomethylated == group_name[2])
+  pie_grp2 <- pie_plot(dat_hypo=dat_hypo_grp2,
+                       group_col=group_name[2])
+  
+  require(patchwork)
+  res <- (pie_grp1 + pie_grp2)+
+    plot_layout(guides = 'collect')+  
+    guide_area()
+  
+  return(res)
+}
+
+PPC_Hypomethy_probes <- Hypomethy_probes_distribution(datset=DMP_PPC,
+                              group_name=c("ParacancerousTissue", "PrimaryCancerTissue"))
+PPC_Hypomethy_probes
+ggsave("../../Result/Figure/Paracancerous_PrimaryCancer_DMP_pie.pdf", PPC_Hypomethy_probes, width = 10, height = 6)
+
+
+PCL_Hypomethy_probes <- Hypomethy_probes_distribution(datset=DMP_PCL,
+                              group_name=c("PrimaryCancerTissue", "LiverMetastasis"))
+PCL_Hypomethy_probes
+ggsave("../../Result/Figure/Paracancerous_PrimaryCancer_DMP_pie.pdf", PCL_Hypomethy_probes, width = 10, height = 6)
+```
+
+
+### Hypomethylated Regions
+
+* Enhancer DMRs were defined as regions comprised of or at least containing significantly differentially methylated probes targeting enhancers.
+
+* Constituted of minimum 5 CpG sites with Stouffer transformed FDR below 0.05
+
+* the parameters in  DMRcate::cpg.annotate
+
+  * ParacancerousTissue vs PrimaryCancerTissue (FDR < 0.001)
+  
+  * PrimaryCancerTissue vs LiverMetastasis(FDR < 0.05)
+  
+  
+**We extracted the intersection between the DMRs' overlap.genes and the annotated UCSC's gene chosen by category prioritization.**
+
+```{r}
+Hypomethy_region <- function(datset=DMR_PPC,
+                             group_name=c("ParacancerousTissue", "PrimaryCancerTissue"),
+                             ncpgs=5,
+                             subGroup="Promoters"){
+  
+  # datset=DMR_PPC
+  # group_name=c("ParacancerousTissue", "PrimaryCancerTissue")
+  # ncpgs=5
+  # subGroup="Promoters"
+  
+  # DMRs
+  ranges <- data.frame(datset$Range)
+  ranges$DMRs <- paste0("DMR_", 1:nrow(ranges))
+  ranges$Stouffer_FDR <- p.adjust(ranges$Stouffer, method = "BH")
+  dat_range <- ranges[!is.na(ranges$overlapping.genes), ] %>%
+    mutate(Hypomethylated = ifelse(meandiff < 0 , group_name[1], group_name[2])) %>%
+    filter(no.cpgs > ncpgs) %>%
+    filter(Fisher < 0.05) %>%
+    filter(Stouffer_FDR < 0.05) %>%
+    dplyr::select(DMRs,seqnames,start,end,width,strand,no.cpgs,
+                  Hypomethylated,min_smoothed_fdr,Stouffer,Stouffer_FDR,everything()) #%>%
+    #dplyr::slice(1:50)
+
+  # DMRs st promoters
+  if(subGroup == "Promoters"){
+    ann_type <- reannEPIC %>% dplyr::select(Name, Gene_Group, Gene_Name, RefGene_subGroup) %>%
+      filter(RefGene_subGroup == subGroup)    
+  }else if(subGroup == "Enhancer"){
+    # intronic enhancer
+    ann_type <- reannEPIC %>% dplyr::select(Name, Gene_Group, Gene_Name, RefGene_subGroup, Enhancer) %>%
+      filter(Enhancer != FALSE) %>%
+      filter(RefGene_subGroup == "Body")
+  }
+
+  dat_range$Type <- NA
+  dat_range$CpG <- NA
+  dat_range$MatchGene <- NA
+  for(i in 1:nrow(dat_range)){
+    cpg_site <- c()
+    gene_name <- c()
+    gene_char <- unlist(strsplit(dat_range$overlapping.genes[i], ", "))
+    if(length(gene_char) > 1){
+      for(j in 1:length(gene_char)){
+        index <- grep(paste0("^", gene_char[j], "$"), ann_type$Gene_Name, perl = T)
+        cpg_site <- c(cpg_site, ann_type$Name[index])
+        gene_name <- c(gene_name, ann_type$Gene_Name[index])
+      }
+    }else{
+      index <- grep(paste0("^", gene_char, "$"), ann_type$Gene_Name, perl = T)
+      cpg_site <- ann_type$Name[index]
+      gene_name <- ann_type$Gene_Name[index]      
+    }
+
+    cpg_site_all <- paste(cpg_site, collapse = ";")
+    gene_name_all <- paste(unique(gene_name), collapse = ",")
+    if(length(cpg_site) > 3){
+      dat_range$Type[i] <- subGroup
+    }else{
+      dat_range$Type[i] <- FALSE
+    }      
+    dat_range$CpG[i] <- cpg_site_all
+    dat_range$MatchGene[i] <- gene_name_all 
+  }
+  
+  # rm(datset, group_name, ncpgs, subGroup, 
+  #    ranges, dat_range, ann_type, i, j, 
+  #    cpg_site, gene_name, gene_char, 
+  #    index, cpg_site_all, gene_name_all, res)
+
+  res <-  dat_range %>% filter(Type != FALSE)
+  res <- res[!is.na(res$CpG)|!is.na(res$MatchGene), ]
+  return(res)
+}
+
+DMR_PPC_hypoPromoter <- Hypomethy_region(datset = DMR_PPC,
+                                     group_name = c("ParacancerousTissue", "PrimaryCancerTissue"),
+                                     subGroup = "Promoters")
+DMR_PPC_hypoEnhancer <- Hypomethy_region(datset = DMR_PPC,
+                                     group_name = c("ParacancerousTissue", "PrimaryCancerTissue"),
+                                     subGroup = "Enhancer")
+
+DMR_PCL_hypoPromoter <- Hypomethy_region(datset = DMR_PCL,
+                                     group_name = c("PrimaryCancerTissue", "LiverMetastasis"),
+                                     subGroup = "Promoters")
+DMR_PCL_hypoEnhancer <- Hypomethy_region(datset = DMR_PCL,
+                                     group_name = c("PrimaryCancerTissue", "LiverMetastasis"),
+                                     subGroup = "Enhancer")
+
+if(!dir.exists("../../Result/Hypomethylated")){
+  dir.create("../../Result/Hypomethylated")
+}
+write.csv(DMR_PPC_hypoPromoter, "../../Result/Hypomethylated/DMR_PPC_hypomethylatedPromoter.csv", row.names = F)
+write.csv(DMR_PPC_hypoEnhancer, "../../Result/Hypomethylated/DMR_PPC_hypomethylatedEnhancer.csv", row.names = F)
+write.csv(DMR_PCL_hypoPromoter, "../../Result/Hypomethylated/DMR_PCL_hypomethylatedPromoter.csv", row.names = F)
+write.csv(DMR_PCL_hypoEnhancer, "../../Result/Hypomethylated/DMR_PCL_hypomethylatedEnhancer.csv", row.names = F)
+```
+
+
+### systemic information
+```{r}
+sessionInfo()
+```
+
+
+### Reference
+
+1. Epigenetic regulation of the lineage specificity of primary human dermal lymphatic and blood vascular endothelial cells
+
+2. Validation of a DNA methylation microarray for 850,000 CpG sites of the human genome enriched in enhancer sequences
+
+3. Infinium MethylationEPIC Manifest Column Headings

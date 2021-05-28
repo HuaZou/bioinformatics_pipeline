@@ -1,0 +1,191 @@
+---
+title: "Enriched pathway analysis: GO term of Biological Process"
+date: "Created: 2021-03-23 Updated: `r Sys.Date()`"
+author: 
+  - name: "Hua Zou"
+    email: "zouhua1@outlook.com"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## Introduction
+
+Performing  Over Representation Analysis of the up- or down-regulated DEGs  via **clusterProfiler** and **enrichplot** package based on the limma package.
+
+* *clusterProfiler* calculates the enrichment score
+
+* *enrichplot* displays the enrichment result
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(data.table)
+library(clusterProfiler)
+library(enrichplot)
+library(patchwork)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data
+
+1. Human: the number of samples (n=197)
+
+  * NC:  69
+  
+  * DCM: 63
+  
+  * ICM: 65
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+  
+  * HF: 25
+  
+```{r}
+hsp_DCM <- read.csv("../../Result/Differential/final/Hsp_DCM_NC_Diffgene.csv")
+hsp_ICM <- read.csv("../../Result/Differential/final/Hsp_ICM_NC_Diffgene.csv")
+
+mus_TAC <- read.csv("../../Result/Differential/final/Mus_TAC_NC_Diffgene.csv")
+mus_HF <- read.csv("../../Result/Differential/final/Mus_HF_NC_Diffgene.csv")
+```
+
+
+### Curation Function 
+```{r}
+get_ORA <- function(dataset=hsp_DCM){
+  
+  # dataset=hsp_DCM
+  
+  # extract DEGs
+  dat <- dataset %>% 
+    dplyr::rename(SYMBOL=GeneID, log2FoldChange=logFC) %>%
+    filter(Enrichment != "Nonsignif") %>%
+    distinct() %>%
+    arrange(log2FoldChange)
+  
+  # transform geneid
+  require(org.Hs.eg.db)
+  symbol2entrz <- AnnotationDbi::select(org.Hs.eg.db,
+                                      key=dat$SYMBOL, 
+                                      columns="ENTREZID",
+                                      keytype="SYMBOL")
+  symbol2entrz <- as_tibble(symbol2entrz)
+
+  dat_v2 <- inner_join(symbol2entrz, dat, by ="SYMBOL") %>%
+    dplyr::select(ENTREZID, log2FoldChange) %>%
+    na.omit() %>% 
+    distinct() %>% 
+    group_by(ENTREZID) %>% 
+    summarize(log2FoldChange=mean(log2FoldChange)) %>%
+    ungroup() %>%
+    arrange(desc(log2FoldChange))
+  
+  geneList <- tibble::deframe(dat_v2)  
+  es_res <- enrichGO(gene          = names(geneList),
+                     OrgDb         = org.Hs.eg.db,
+                     keyType       = "ENTREZID",
+                     ont           = "BP",
+                     pAdjustMethod = "BH",
+                     pvalueCutoff  = 0.01,
+                     qvalueCutoff  = 0.05)
+
+  return(es_res)
+}
+
+plot_Escore <- function(dataset=GSEA_kegg,
+                        number=10,
+                        color=hsp.grp.col[2]){
+  # dataset=es_res
+  # number=10
+  # color=hsp.grp.col[2]  
+  
+  edox <- setReadable(dataset, 'org.Hs.eg.db', 'ENTREZID')
+  
+  dat_es <- edox@result %>%
+    filter(p.adjust < 0.01) %>%
+    arrange(p.adjust)
+  dat_plot <- dat_es[1:number, ] %>%
+    mutate(value=-log10(p.adjust)) %>%
+    arrange(value)
+  dat_plot$Description <- factor(dat_plot$Description, levels = dat_plot$Description)
+  
+  pl <- ggplot(data = dat_plot, aes(x=Description, y=value))+
+    geom_bar(stat = "identity", fill=color, color="black", width = 0.6)+
+    labs(x="", y=expression(-log[10]("adjusted p-value")))+
+    scale_y_continuous(trans = "log1p")+
+    theme_classic()+
+    coord_flip()+
+    theme(axis.title = element_text(face = 'bold',color = 'black',size = 14),
+                  axis.text = element_text(color = 'black',size = 10),
+                  text = element_text(size = 8, color = "black", family="serif"),
+                  legend.position = 'right',
+                  legend.key.height = unit(0.6,'cm'),
+                  legend.text = element_text(face = "bold", color = 'black',size = 10),
+                  strip.text = element_text(face = "bold", size = 14))
+
+  return(pl)
+}
+```
+
+
+### Human DCM vs ICM
+```{r}
+DEGs_ORA_GO_DCM_NC <- get_ORA(dataset = hsp_DCM)
+DEGs_ORA_GO_ICM_NC <- get_ORA(dataset = hsp_ICM)
+
+DEGs_ORA_GO_barplot_DCM <- plot_Escore(dataset = DEGs_ORA_GO_DCM_NC, number = 10, color=hsp.grp.col[2])
+
+DEGs_ORA_GO_barplot_ICM <- plot_Escore(dataset = DEGs_ORA_GO_ICM_NC, number = 10, color=hsp.grp.col[4])
+
+DEGs_ORA_GO_DCM_ICM <- (DEGs_ORA_GO_barplot_DCM)/(DEGs_ORA_GO_barplot_ICM)+
+  plot_layout(ncol = 1)
+DEGs_ORA_GO_DCM_ICM
+ggsave(filename = "../../Result/Figures/version_210322/Fig1D.pdf", 
+       DEGs_ORA_GO_DCM_ICM, width = 7, height = 6)
+```
+
+
+### Mouse TAC vs HF
+```{r}
+DEGs_ORA_GO_TAC_NC <- get_ORA(dataset = mus_TAC)
+DEGs_ORA_GO_HF_NC <- get_ORA(dataset = mus_HF)
+
+DEGs_ORA_GO_barplot_TAC <- plot_Escore(dataset = DEGs_ORA_GO_TAC_NC, number = 10, color=mus.grp.col[2])
+
+DEGs_ORA_GO_barplot_HF <- plot_Escore(dataset = DEGs_ORA_GO_HF_NC, number = 10, color=mus.grp.col[4])
+
+DEGs_ORA_GO_TAC_HF <- (DEGs_ORA_GO_barplot_TAC)/(DEGs_ORA_GO_barplot_HF)+
+  plot_layout(ncol = 1)
+DEGs_ORA_GO_TAC_HF
+ggsave(filename = "../../Result/Figures/version_210322/Fig1F.pdf", 
+       DEGs_ORA_GO_TAC_HF, width = 7, height = 6)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [Functional Enrichment Analysis Methods](http://yulab-smu.top/clusterProfiler-book/chapter2.html) 

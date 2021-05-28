@@ -1,0 +1,217 @@
+---
+title: "Differential Gene Expression: Heatmap"
+date: "Created: 2021-03-22 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(ComplexHeatmap)
+
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data
+
+1. Human: the number of samples (n=197)
+
+  * NC:  69
+  
+  * DCM: 63
+  
+  * ICM: 65
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+  
+  * HF: 25
+  
+```{r}
+hsp_DCM <- read.csv("../../Result/Differential/final/Hsp_DCM_NC_Diffgene.csv")
+hsp_ICM <- read.csv("../../Result/Differential/final/Hsp_ICM_NC_Diffgene.csv")
+
+mus_TAC <- read.csv("../../Result/Differential/final/Mus_TAC_NC_Diffgene.csv")
+mus_HF <- read.csv("../../Result/Differential/final/Mus_HF_NC_Diffgene.csv")
+
+hsp_mus_ExprSet <- readRDS("../../Result/Profile/final/Hsp_Mus_ExprSet_VoomSNM.RDS") 
+```
+
+
+### expressionset function
+```{r}
+get_ExprSet <- function(datset1=hsp_DCM,
+                        datset2=hsp_ICM,
+                        datset3=mus_TAC,
+                        datset4=mus_HF,
+                        ExprSet=hsp_mus_ExprSet,
+                        group_name=c("NC", "DCM", "ICM", "TAC_NC", "TAC", "HF_NC", "HF"),
+                        pval=0.05, 
+                        fc=1){
+  
+  # datset1=hsp_DCM
+  # datset2=hsp_ICM
+  # datset3=mus_TAC
+  # datset4=mus_HF
+  # ExprSet=hsp_mus_ExprSet
+  # group_name=c("DCM", "ICM", "TAC", "HF")
+  # pval=0.01
+  # fc=1
+  
+  dat1 <- datset1 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    filter(color != "Nonsignif")
+  
+  dat2 <- datset2 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    filter(color != "Nonsignif")
+  
+  dat3 <- datset3 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    filter(color != "Nonsignif")
+  
+  dat4 <- datset4 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    filter(color != "Nonsignif")
+  
+  union_gene <- Reduce(union, list(dat1$GeneID, dat2$GeneID,
+                      dat3$GeneID, dat4$GeneID))
+  pheno <- pData(ExprSet) %>% data.frame() %>%
+    rownames_to_column("SampleID") %>%
+    filter(Group%in%group_name) %>%
+    mutate(Group=factor(Group, levels = group_name)) %>%
+    arrange(Group) %>%
+    column_to_rownames("SampleID")
+  
+  edata <- exprs(ExprSet) %>% data.frame() %>%
+    rownames_to_column("geneid") %>%
+    filter(geneid%in%union_gene) %>%
+    dplyr::select(c("geneid", rownames(pheno))) %>%
+    column_to_rownames("geneid")
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(edata)){ 
+    if (!(colnames(edata)[i] == rownames(pheno)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  exprs <- as.matrix(edata)
+  adf <-  new("AnnotatedDataFrame", data=pheno)
+  experimentData <- new("MIAME",
+        name="ShuiLin Liao", lab="Dong gdl Lab",
+        contact="dong_ming@grmh-gdl.cn",
+        title="Heart-failure Experiment",
+        abstract="The gene ExpressionSet",
+        url="www.grmh-gdl.cn",
+        other=list(notes="Significant Genes"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  
+  return(expressionSet)
+}
+
+  ### heatmap
+heatFun <- function(ExprSet=Diff_ExprSet){
+  
+  # ExprSet=Diff_ExprSet
+  
+  pheno <- pData(ExprSet) %>%
+    arrange(Group)
+  edata <- exprs(ExprSet) %>%
+    data.frame() %>%
+    dplyr::select(rownames(pheno)) 
+  
+  # scale data: z-score
+  scale_rows <- function (x) {
+      m = apply(x, 1, mean, na.rm = T)
+      s = apply(x, 1, sd, na.rm = T)
+      return((x - m)/s)
+  }  
+  edata_scaled <- t(scale_rows(edata))
+  require(circlize)
+  col_fun <- colorRamp2(c(round(range(edata_scaled)[1]), 0, 
+                          round(range(edata_scaled)[2])),
+                        c("blue", "white", "red")) 
+  # row split 
+  dat_status <- table(pheno$Group)
+  dat_status_number <- as.numeric(dat_status)
+  dat_status_name <- names(dat_status)
+  row_split <- c()
+  for (i in 1:length(dat_status_number)) {
+    row_split <- c(row_split, rep(i, dat_status_number[i]))
+  }
+  
+  Heatmap(
+          edata_scaled, 
+          col = col_fun,
+          cluster_rows = FALSE,
+          row_order = rownames(pheno),
+          show_column_names = FALSE,
+          show_row_names = FALSE,
+          row_names_gp = gpar(fontsize = 12),
+          row_names_side = "right",
+          row_dend_side = "left",
+          column_title = NULL, 
+          heatmap_legend_param = list(
+            title = "Gene Expression\nZscore",
+            title_position = "topcenter",
+            border = "black",
+            legend_height = unit(10, "cm"),
+            direction = "horizontal"),
+         row_split = row_split,
+        left_annotation = rowAnnotation(foo = anno_block(gp = gpar(fill = 2:8),
+            labels = c("NC", "DCM", "ICM", "TAC_NC", "TAC", "HF_NC", "HF"), 
+            labels_gp = gpar(col = "black", fontsize = 12))),         
+         column_km = 4
+    )
+}
+```
+
+
+### Heatmap plot
+```{r}
+Diff_ExprSet <- get_ExprSet(datset1=hsp_DCM,
+                         datset2=hsp_ICM,
+                         datset3=mus_TAC,
+                         datset4=mus_HF,
+                         ExprSet=hsp_mus_ExprSet,
+                         group_name=c("NC", "DCM", "ICM", "TAC_NC", "TAC", "HF_NC", "HF"),
+                         pval=0.05, 
+                         fc=1)
+pdf("../../Result/Figures/version_210322/SFig3F.pdf", width = 9, height = 9)
+heatFun(ExprSet=Diff_ExprSet)
+dev.off()
+```
+
+
+### Systemic information
+```{r}
+sessionInfo()
+```

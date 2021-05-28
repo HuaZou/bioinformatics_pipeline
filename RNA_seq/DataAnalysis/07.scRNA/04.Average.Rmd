@@ -1,0 +1,101 @@
+---
+title: "Average expression value"
+date: "Created: 2020-02-01; modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(Seurat)
+library(ggplot2)
+library(readr)
+library(data.table)
+
+options(future.globals.maxSize = 10000 * 1024^2)
+```
+
+
+### load data 
+```{r}
+data.integrated <- readRDS("../../Result/sc_profile/RDS/data.normal.celltype_rename.rds")
+```
+
+```{r}
+FetchData(data.integrated, 
+         vars = c("ident", "Individual")) %>%
+        dplyr::count(ident, Individual) %>%
+        tidyr::spread(ident, n) 
+```
+
+
+
+### get expression value and phenotype
+```{r}
+cell_count <- FetchData(data.integrated, 
+         vars = c("ident", "Individual")) %>%
+        dplyr::count(ident, Individual) %>%
+        tidyr::spread(ident, n) %>%
+  na.omit()
+
+metadata <- data.integrated@meta.data %>%
+  rownames_to_column("CellID") %>% 
+  dplyr::select(CellID, Individual, Batch) %>% 
+  filter(Individual%in%cell_count$Individual) %>%
+  inner_join(Idents(data.integrated) %>%
+               data.frame() %>%
+               setNames("CellType") %>%
+               rownames_to_column("CellID"),
+             by = "CellID")
+
+write.csv(metadata, file = "../../Result/sc_profile/Average/metadata_normal.csv", 
+          row.names = F)
+
+# RNA SCT profile 
+write.csv(data.integrated@assays[["SCT"]]@counts, 
+          file = "../../Result/sc_profile/Average/SCT_normal.profile.csv")
+```
+
+
+### get average expression of each cell types based on individuals
+```{r}
+prof <- fread("../../Result/sc_profile/Average/SCT_normal.profile.csv") %>%
+  column_to_rownames("V1")
+phen <- read.csv("../../Result/sc_profile/Average/metadata_normal.csv")
+
+prof.cln <- prof[rowSums(prof) > 0, ]
+mdat <- inner_join(phen %>% dplyr::select(CellID, Individual, CellType) %>%
+                     mutate(CellID=gsub("-", ".", CellID)),
+                   prof.cln %>% t() %>% data.frame() %>% 
+                     rownames_to_column("CellID"),
+                   by = "CellID")
+
+
+mdat.average <- mdat %>% column_to_rownames("CellID") %>% 
+  group_by(Individual, CellType) %>%
+  summarise_each(mean)
+write.csv(mdat.average, "../../Result/sc_profile/Average/average_normal.csv")
+
+mdat.average_all <- mdat %>% column_to_rownames("CellID") %>% 
+  dplyr::select(-CellType) %>%
+  group_by(Individual) %>%
+  summarise_each(mean)
+write.csv(mdat.average_all, "../../Result/sc_profile/Average/average_all_normal.csv")
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+
+
+### reference 
+
+1. [how to get expression matrix from seurat](https://www.biostars.org/p/420841/)
+
+2. [how to use AddMeta in seurat](https://www.rdocumentation.org/packages/Seurat/versions/3.1.4/topics/AddMetaData)
+

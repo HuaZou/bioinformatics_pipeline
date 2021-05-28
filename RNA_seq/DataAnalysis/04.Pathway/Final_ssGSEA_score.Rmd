@@ -1,0 +1,431 @@
+---
+title: "Gene-set enrichment analysis: Whole KEGG pathway"
+date: "Created: 2021-03-24 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(GSVA)
+library(convert)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data
+
+1. Human: the number of samples (n=197)
+
+  * NC:  69
+  
+  * DCM: 63
+  
+  * ICM: 65
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+  
+  * HF: 25
+  
+```{r}
+hsp.set <- readRDS("../../Result/Profile/final/Homo_sapiens_ExprSet_VoomSNM_symbol_final.RDS")
+mus.set <- readRDS("../../Result/Profile/final/Mus_musculus_ExprSet_VoomSNM_Hsymbol_final.RDS")
+
+genelist <- qusage::read.gmt("../../Result/GeneSetdb/msigdb.v7.1.KEGG.symbols_210324.gmt")
+
+phen <- read.csv("../../Result/Phenotype/phenotype_final.csv")
+kegg <- fread("../../Result/Pathway/KEGG_pathway_Description.tsv")
+```
+
+
+### Function: single samples Gene-Set Enrichment Analysis
+```{r}
+get_gsea_score <- function(dataset=hsp.set,
+                           geneset=genelist,
+                           methods="ssgsea"){
+  # dataset=hsp.set
+  # geneset=genelist
+  # methods="ssgsea"  
+  
+  dat_fit <- gsva(expr = dataset, 
+              gset.idx.list = geneset,
+              method = methods, 
+              min.sz = 5, 
+              max.sz = 500,
+              kcdf = "Gaussian")
+  res <- exprs(dat_fit) %>% t() %>% 
+    data.frame() %>%
+    rownames_to_column("SampleID")
+  
+  return(res)
+}
+
+
+wilcox_fun <- function(x, y, DNAID, GROUP,
+                       grp1=NULL, grp2=NULL){
+  
+  # x=phylum 
+  # y=phen
+  # DNAID="SampleID"
+  # GROUP="Group"
+  
+  # determine x with two cols and names are corret
+  phe <- x %>% select(c(DNAID, GROUP))
+  colnames(phe)[which(colnames(phe) == DNAID)] <- "SampleID"
+  colnames(phe)[which(colnames(phe) == GROUP)] <- "Stage"
+  if (length(which(colnames(phe)%in%c("SampleID","Stage"))) != 2){
+    warning("x without 2 cols: DNAID, GROUP")
+  }
+  
+  # select groups
+  if(length(grp1)){
+    phe.cln <- phe %>% filter(Stage%in%c(grp1, grp2)) %>%
+      mutate(Stage=factor(Stage, levels = c(grp1, grp2)))
+    pr <- c(grp1, grp2)
+  } else{
+    phe.cln <- phe %>% mutate(Stage=factor(Stage))
+    pr <- levels(phe.cln$Stage)
+  }
+  
+  if (length(levels(phe.cln$Stage)) > 2) {
+    stop("The levels of `group` are more than 2")
+  }
+  
+  # profile
+  sid <- intersect(phe.cln$SampleID, colnames(y))
+  prf <- y %>% select(sid) %>%
+    # rownames_to_column("tmp") %>%
+    # filter(apply(select(., -one_of("tmp")), 1, 
+    #              function(x){sum(x > 0)/length(x)}) > 0.2) %>%
+    # data.frame() %>% column_to_rownames("tmp") %>%
+    t() %>% data.frame()
+  
+  # judge no row of profile filter
+  if (ncol(prf) == 0) {
+    stop("No row of profile to be choosed\n")
+  }
+  
+  # merge phenotype and profile
+  mdat <- inner_join(phe.cln %>% filter(SampleID%in%sid),
+                     prf %>% rownames_to_column("SampleID"),
+                     by = "SampleID")
+  dat.phe <- mdat %>% select(c(1:2))
+  dat.prf <- mdat %>% select(-2)
+  
+  res <- apply(dat.prf[, -1], 2, function(x, grp){
+    dat <- as.numeric(x)
+    p <- signif(wilcox.test(dat ~ grp, paired = F)$p.value, 6)
+    # mean
+    md <- signif(mean(dat), 4)
+    mdn <- signif(tapply(dat, grp, mean), 4)
+    if ( mdn[1] > mdn[2] & p < 0.05) {
+      enrich1 <- pr[1]
+    } else if (mdn[1] < mdn[2] & p < 0.05) {
+      enrich1 <- pr[2]
+    } else if (p > 0.05 | mdn[1] == mdn[2]){
+      enrich1 <- "No significance"
+    }
+    
+    # rank
+    rk <- rank(dat)
+    rnk <- signif(tapply(rk, grp, mean), 4)
+    if ( rnk[1] > rnk[2] & p < 0.05) {
+      enrich2 <- pr[1]
+    } else if (rnk[1] < rnk[2] & p < 0.05) {
+      enrich2 <- pr[2]
+    } else if (p > 0.05 | rnk[1] == rnk[2]){
+      enrich2 <- "No significance"
+    }
+    occ <- signif(tapply(dat, grp, function(x){
+      round(sum(x > 0)/length(x), 4)}), 4)
+
+    
+    res <- c(p,enrich1,enrich2,occ,md,mdn,rnk)
+    return(res)
+  }, dat.phe$Stage) %>%
+    t(.) %>% data.frame(.) %>%
+    rownames_to_column("type") %>%
+    varhandle::unfactor(.)
+  
+  colnames(res)[2:11] <- c("Pvalue", "Enrich_mean", "Enrich_rank",
+                           paste0(pr, "_occurence"), "mean_all",
+                           paste0(pr, "_mean"), paste0(pr, "_rank"))
+  res$Block <- paste0(pr[1], "_vs_", pr[2])
+  number <- as.numeric(table(dat.phe$Stage))
+  res$Num <- paste0(pr[1], number[1], "_vs_",
+                    pr[2], number[2])
+  res.cln <- res %>% select(c(1,12:13, 2:11)) %>%
+    mutate(Pvalue=as.numeric(Pvalue)) %>%
+    mutate(FDR=p.adjust(Pvalue, method = "BH")) %>%
+    arrange(FDR, Pvalue)
+  res2 <- res.cln[,c(1:4,14,5:13)]
+  
+  
+  # scale profile
+  dat.prf.cln <- prf[, -1]
+  dat.phe.cln <- dat.phe %>% mutate(Group=ifelse(Stage==pr[1], 0, 1))
+  idx <- which(colnames(dat.phe.cln) == "Group")
+  
+  # glm result for odd ratios 95%CI
+  glmFun <- function(m, n){
+    dat.glm <- data.frame(group=m, marker=scale(n, center=T, scale=T))
+    model <- summary(glm(group ~ marker, data = dat.glm,
+                         family = binomial(link = "logit")))
+    res <- signif(exp(model$coefficients["marker",1]) +
+                    qnorm(c(0.025,0.5,0.975)) * model$coefficients["marker",1], 2)
+    
+    return(res)
+  }
+  
+  glm_res <- t(apply(dat.prf.cln, 2, function(x, group){
+    res <- glmFun(group, as.numeric(x))
+    return(res)
+  }, group = dat.phe.cln[, idx]))
+  Odd <- glm_res %>% data.frame() %>%
+    setNames(c("upper", "expected","lower")) %>%
+    mutate("Odds Ratio (95% CI)" = paste0(expected, " (", lower, ";", upper, ")"))
+  Odd$type <- rownames(glm_res)
+  
+  res_merge <- inner_join(res2,
+                          Odd[, c(4:5)], by = "type")
+  
+  return(res_merge)
+}
+
+limma_eBaye <- function(dataset=datprf,
+                         metadata=datphe,
+                         group_col=group_name,
+                         fc=1,
+                         Pval=0.05){
+  
+  # dataset=datprf
+  # metadata=datphe
+  # group_col=group_name
+  # fc=1
+  # Pval=0.05
+  
+  phe <- metadata %>%
+    filter(Group%in%group_col) %>%
+    column_to_rownames("SampleID")
+  phe$Group <- factor(phe$Group, levels = group_col)
+  print(table(phe$Group))
+  
+  prof <- dataset %>% 
+    dplyr::select(rownames(phe))
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prof)){ 
+    if (!(colnames(prof)[i] == rownames(phe)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  
+  design <- model.matrix(~0 + phe$Group)
+  rownames(design) <- rownames(phe)
+  colnames(design) <- group_col
+  exprSet <- prof
+
+  # linear fitting 
+  fit <- lmFit(exprSet, design, method = 'ls')
+  
+  # contrast group 
+  group <- paste(group_col, collapse = "-")
+  if(group%in%"TAC-TAC_NC"){
+    contrast <- makeContrasts("TAC-TAC_NC", levels = design) 
+  }else if(group%in%"HF-HF_NC"){
+    contrast <- makeContrasts("HF-HF_NC", levels = design)
+  }else if(group%in%"HF-TAC"){
+    contrast <- makeContrasts("HF-TAC", levels = design)
+  }else if(group%in%"DCM-NC"){
+    contrast <- makeContrasts("DCM-NC", levels = design)
+  }else if(group%in%"HCM-NC"){
+    contrast <- makeContrasts("HCM-NC", levels = design)
+  }else if(group%in%"ICM-NC"){
+    contrast <- makeContrasts("ICM-NC", levels = design)
+  }else if(group%in%"NICM-NC"){
+    contrast <- makeContrasts("NICM-NC", levels = design)
+  }
+  print(contrast)
+  
+  # eBayes
+  fit2 <- contrasts.fit(fit, contrast)
+  fit2 <- eBayes(fit2)
+  
+  # differential features
+  diff_gene <- topTable(fit2, number = Inf, adjust.method = 'BH') %>%
+    rownames_to_column("GeneID")
+  
+  diff_gene[which(diff_gene$logFC >= fc & diff_gene$adj.P.Val < Pval), "Enrichment"] <- group_col[1]
+  diff_gene[which(diff_gene$logFC <= -fc & diff_gene$adj.P.Val < Pval), "Enrichment"] <- group_col[2]
+  diff_gene[which(abs(diff_gene$logFC) < fc | diff_gene$adj.P.Val >= Pval), "Enrichment"] <- "Nonsignif"
+  
+  res <- diff_gene %>% dplyr::select(GeneID, logFC, adj.P.Val, Enrichment, everything()) %>%
+    arrange(adj.P.Val, logFC) 
+  
+  return(res)
+}
+
+test_fun <- function(pathway=kegg,
+                     score=hsp_score,
+                     metadata=phen,
+                     pathway_level2=c("Carbohydrate metabolism", 
+                                      "Lipid metabolism",
+                                      "Energy metabolism", 
+                                      "Amino acid metabolism",
+                                      "Immune system"),
+                     group_name=c("DCM", "NC")){
+
+  # pathway=kegg
+  # score=hsp_score
+  # metadata=phen
+  # pathway_level2=c("Carbohydrate metabolism",
+  #                   "Lipid metabolism",
+  #                   "Energy metabolism",
+  #                   "Amino acid metabolism",
+  #                   "Immune system")
+  # group_name=c("DCM", "NC")
+  
+  
+  pathway_new <- pathway %>% dplyr::select(PathwayID, Pathway, Level1, Level2) %>%
+    unique() %>%
+    filter(Level2%in%pathway_level2) %>%
+    mutate(Pathway=toupper(Pathway)) %>%
+    group_by(Pathway) %>%
+    mutate(Pathway=gsub("\\s+|,|-|\\/|\\(|\\)", "_", Pathway),
+           Pathway=paste0("KEGG_", gsub("___|__", "_", Pathway)),
+           Pathway=gsub("_$", "", Pathway))
+  
+  common_pathway <- intersect(colnames(score), pathway_new$Pathway) 
+  score_new <- score %>% dplyr::select(all_of(c("SampleID", common_pathway)))
+  pathway_info <- pathway_new %>% filter(Pathway %in% common_pathway)
+  
+  phe <- metadata %>% filter(Group%in%group_name)
+  sid <- intersect(phe$SampleID, score_new$SampleID)
+  
+  mdat <- inner_join(phe %>% dplyr::select(SampleID, Group),
+                     score_new, by = "SampleID")
+  
+  datphe <- mdat[, c(1:2)]
+  datprf <- mdat[, -2] %>% column_to_rownames("SampleID") %>%
+    t() %>% data.frame()
+  
+  wilcox_res <- wilcox_fun(datphe, datprf, "SampleID", "Group")
+  limma_res <- limma_eBaye(dataset = datprf,
+                           metadata = datphe,
+                           group_col = group_name)
+  
+  res <- list(pathway=pathway_info,
+              wilcox=wilcox_res,
+              limma=limma_res)
+  return(res)
+}
+```
+
+
+### Human 
+```{r}
+hsp_score <- get_gsea_score(dataset = hsp.set)
+if(!dir.exists("../../Result/Pathway/final/")){
+  dir.create("../../Result/Pathway/final/", recursive = T)
+}
+write.csv(hsp_score, "../../Result/Pathway/final/hsp_ssGSEA_KEGG.csv", row.names = F)
+
+
+DCM_wilcox <- test_fun(score=hsp_score,
+                       group_name=c("DCM", "NC"))
+write.csv(DCM_wilcox$wilcox, "../../Result/Pathway/final/hsp_ssGSEA_KEGG_DCM_wilcox.csv", row.names = F)
+write.csv(DCM_wilcox$limma, "../../Result/Pathway/final/hsp_ssGSEA_KEGG_DCM_limma.csv", row.names = F)
+write.csv(DCM_wilcox$pathway, "../../Result/Pathway/final/KEGG_pathway_metabolism_immune.csv", row.names = F)
+
+ICM_wilcox <- test_fun(score=hsp_score,
+                       group_name=c("ICM", "NC"))
+write.csv(ICM_wilcox$wilcox, "../../Result/Pathway/final/hsp_ssGSEA_KEGG_ICM_wilcox.csv", row.names = F)
+write.csv(ICM_wilcox$limma, "../../Result/Pathway/final/hsp_ssGSEA_KEGG_ICM_limma.csv", row.names = F)
+```
+
+
+### Mouse 
+```{r}
+mus_score <- get_gsea_score(dataset = mus.set)
+if(!dir.exists("../../Result/Pathway/final/")){
+  dir.create("../../Result/Pathway/final/", recursive = T)
+}
+write.csv(mus_score, "../../Result/Pathway/final/mus_ssGSEA_KEGG.csv", row.names = F)
+
+TAC_wilcox <- test_fun(score=mus_score,
+                       group_name=c("TAC", "TAC_NC"))
+write.csv(TAC_wilcox$wilcox, "../../Result/Pathway/final/mus_ssGSEA_KEGG_TAC_wilcox.csv", row.names = F)
+write.csv(TAC_wilcox$limma, "../../Result/Pathway/final/hsp_ssGSEA_KEGG_TAC_limma.csv", row.names = F)
+
+HF_wilcox <- test_fun(score=mus_score,
+                      group_name=c("HF", "HF_NC"))
+write.csv(HF_wilcox$wilcox, "../../Result/Pathway/final/mus_ssGSEA_KEGG_HF_wilcox.csv", row.names = F)
+write.csv(HF_wilcox$limma, "../../Result/Pathway/final/hsp_ssGSEA_KEGG_HF_limma.csv", row.names = F)
+```
+
+
+### Combined All the result 
+```{r}
+merge_fun <- function(DCM=DCM_wilcox,
+                      ICM=ICM_wilcox,
+                      TAC=TAC_wilcox,
+                      HF=HF_wilcox){
+  
+  Pvalue_matrix <- inner_join(DCM$wilcox %>% dplyr::select(type, Pvalue) %>%
+                                dplyr::rename(DCM_Pvalue=Pvalue),
+                              ICM$wilcox %>% dplyr::select(type, Pvalue) %>%
+                                dplyr::rename(ICM_Pvalue=Pvalue),
+                              by = "type") %>%
+    inner_join(TAC$wilcox %>% dplyr::select(type, Pvalue) %>%
+                                dplyr::rename(TAC_Pvalue=Pvalue),
+               by = "type") %>% 
+    inner_join(HF$wilcox %>% dplyr::select(type, Pvalue) %>%
+                                dplyr::rename(HF_Pvalue=Pvalue),
+               by = "type") 
+  
+  group_name <- c("NC", "DCM", "ICM", "TAC_NC", "TAC", "HF_NC", "HF")
+  phe <- phen %>% filter(Group %in% group_name)
+  
+  ssGSEA <- hsp_score %>% column_to_rownames("SampleID") %>% 
+    t() %>% data.frame() %>%
+    rownames_to_column("type") %>% 
+    inner_join(mus_score %>% column_to_rownames("SampleID") %>% 
+      t() %>% data.frame() %>%
+      rownames_to_column("type"), by ="type") %>%
+    dplyr::select(c("type", as.character(phe$SampleID)))
+  
+  res <- DCM_wilcox$pathway %>%
+    inner_join(Pvalue_matrix, by =c("Pathway"="type")) %>%
+    inner_join(ssGSEA, by =c("Pathway"="type"))
+  
+  return(res)
+}
+score_merge_pathway <- merge_fun()
+write.csv(score_merge_pathway, "../../Result/Pathway/final/hsp_mus_mergeKEGG_wilcox.csv", row.names = F)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+

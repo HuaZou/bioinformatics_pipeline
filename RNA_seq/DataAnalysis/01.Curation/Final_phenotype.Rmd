@@ -1,0 +1,122 @@
+---
+title: "Phenotype: show the samples information"
+date: "Created: 2021-01-25 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(ggplot2)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+### load data 
+```{r}
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20210118.csv")
+```
+
+
+### show data 
+```{r, fig.width=8, fig.height=8}
+phen$Type <- ifelse(phen$Organism == "Homo sapiens", "public_human", 
+                    ifelse(phen$Batch%in%c("HF_b2", "HF_novo", "TAC_b1", "TAC_novo"), 
+                           "self_mouse", "public_mouse"))
+
+phen$Type2 <- ifelse(phen$Organism == "Homo sapiens", "public_human", "all_mouse")
+
+
+freq <- data.frame(with(phen, table(Group, Type))) %>%
+  dplyr::filter(Freq != 0) 
+
+freq2 <- data.frame(with(phen, table(Group, Type2))) %>%
+  dplyr::filter(Freq != 0) %>%
+  dplyr::rename(Type=Type2)
+
+dat_freq <- rbind(freq, freq2) %>% unique() %>%
+  mutate(Group=factor(Group, levels = c(hsp.grp, mus.grp)),
+         Type=factor(Type, levels = c("public_human", "all_mouse",
+                                      "public_mouse", "self_mouse")))
+
+pl <- ggplot(dat_freq, aes(x=Group, y=Freq, fill=Group))+
+  geom_bar(color="black", stat="identity", 
+           position="dodge", width=0.6)+
+  geom_text(aes(label=Freq), position=position_dodge(0.5),
+            size=5, color="black", vjust=-0.5)+
+
+  scale_fill_manual(values=c(hsp.grp.col, mus.grp.col))+
+  guides(fill=F)+
+  labs(x="", y="The samples' count per group")+
+  facet_wrap(facets="Type", scales="free")+ 
+  theme_classic()+
+  theme(axis.ticks.length = unit(0.2, "cm"),
+        axis.title = element_text(face = "bold", size = 12),
+        axis.text.x = element_text(face = "bold", size = 10, 
+                                   angle = 45, vjust = .5, hjust = .5),
+        axis.text.y = element_text(size = 10, face = "bold"),
+        strip.text = element_text(color = 'red', face = 'bold', size = rel(1.5)),
+        text = element_text(size = 10, color = "black", family="serif"),
+        strip.background = element_rect(colour = 'black', size = rel(2)))
+pl
+```
+
+### 20210316
+
+```{r, fig.width=8, fig.height=5}
+phen <- read.csv("../../Result/Phenotype/phenotype_final.csv")
+phen$Type <- ifelse(phen$Organism == "Homo sapiens", "public_human", 
+                    ifelse(phen$Batch%in%c("HF_b2", "HF_novo", "TAC_b1", "TAC_novo"), 
+                           "self_mouse", "public_mouse"))
+
+phen$Type2 <- ifelse(phen$Organism == "Homo sapiens", "public_human", "all_mouse")
+
+freq <- data.frame(with(phen, table(Group, Type))) %>%
+  dplyr::filter(Freq != 0) 
+
+freq2 <- data.frame(with(phen, table(Group, Type2))) %>%
+  dplyr::filter(Freq != 0) %>%
+  dplyr::rename(Type=Type2) 
+
+dat_freq <- rbind(freq, freq2) %>% unique() %>%
+  mutate(Group=factor(Group, levels = c(hsp.grp, mus.grp)),
+         Type=factor(Type, levels = c("public_human", "all_mouse",
+                                      "public_mouse", "self_mouse"))) %>%
+  filter(Type%in%c("public_human", "all_mouse"))
+
+pl <- ggplot(dat_freq, aes(x=Group, y=Freq, fill=Group))+
+  geom_bar(color="black", stat="identity", 
+           position="dodge", width=0.6)+
+  geom_text(aes(label=Freq), position=position_dodge(0.5),
+            size=5, color="black", vjust=-0.5)+
+
+  scale_fill_manual(values=c(hsp.grp.col, mus.grp.col))+
+  guides(fill=F)+
+  labs(x="", y="The samples' count per group")+
+  facet_wrap(facets="Type", scales="free")+ 
+  theme_classic()+
+  theme(axis.ticks.length = unit(0.2, "cm"),
+        axis.title = element_text(face = "bold", size = 12),
+        axis.text.x = element_text(face = "bold", size = 10, 
+                                   angle = 45, vjust = .5, hjust = .5),
+        axis.text.y = element_text(size = 10, face = "bold"),
+        strip.text = element_text(color = 'red', face = 'bold', size = rel(1.5)),
+        text = element_text(size = 10, color = "black", family="serif"),
+        strip.background = element_rect(colour = 'black', size = rel(2)))
+pl
+```
+### 20210322
+
+**Figure1A**: Gene expression matrix from human and murine heart tissues samples
+
+

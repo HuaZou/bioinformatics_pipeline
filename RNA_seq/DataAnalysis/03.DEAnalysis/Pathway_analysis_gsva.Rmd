@@ -1,0 +1,236 @@
+---
+title: "Enriched pathway analysis: The Gene Set Variation Analysis"
+date: "Created: 2021-01-28 Updated: `r Sys.Date()`"
+author: 
+  - name: "Hua Zou"
+    email: "zouhua1@outlook.com"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## Introduction
+
+> The GSVA package implements a non-parametric unsupervised method, called Gene Set Variation
+Analysis (GSVA), for assessing gene set enrichment (GSE) in gene expression microarray and RNA-
+seq data. In contrast to most GSE methods, GSVA performs a change in coordinate systems,
+transforming the data from a gene by sample matrix to a gene set by sample matrix. Thereby
+allowing for the evaluation of pathway enrichment for each sample. This transformation is done
+without the use of a phenotype, thus facilitating very powerful and open-ended analyses in a now
+pathway centric manner.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(data.table)
+library(GSVA)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+grp <- c("S1", "S2")
+grp.col <- c("#6C326C", "#77A2D1")
+```
+
+
+### load data 
+
+* gene Expression DESeq2 object
+```{r}
+phen <- fread("../../Result/phenotype/phenotype_cluster.csv")
+geneExp <- fread("../../Result/profile/geneExp_filter.tsv")
+geneExp <- geneExp %>% column_to_rownames("V1") %>% as.matrix()
+geneExp <- round(geneExp) %>% data.frame() %>% rownames_to_column("V1")
+
+pathways_hallmark_kegg <- fgsea::gmtPathways("../../Result/GeneID/msigdb.v7.1.symbols_KEGG.gmt")
+pathways_hallmark_GO <- fgsea::gmtPathways("../../Result/GeneID/msigdb.v7.1.symbols_GO.gmt")
+```
+
+
+### Curation Function 
+```{r}
+get_ExprSet <- function(x=phen, 
+                        y=geneExp){
+  # x=phen
+  # y=geneExp
+
+  sid <- intersect(x$Barcode, colnames(y))
+  # phenotype
+  phe <- x %>% filter(Barcode%in%sid) %>%
+    mutate(Cluster=factor(as.character(Cluster))) %>%
+    column_to_rownames("Barcode") 
+  
+  # profile 
+  prf <- y %>% column_to_rownames("V1") %>%
+    dplyr::select(all_of(sid))
+  
+  # determine the right order between profile and phenotype 
+  for(i in 1:ncol(prf)){ 
+    if (!(colnames(prf)[i] == rownames(phe)[i])) {
+      stop(paste0(i, " Wrong"))
+    }
+  }
+  require(convert)
+  exprs <- as.matrix(prf)
+  adf <-  new("AnnotatedDataFrame", data=phe)
+  experimentData <- new("MIAME",
+        name="Hua Zou", lab="Hua Lab",
+        contact="zouhua1@outlook.com",
+        title="KRIC Experiment",
+        abstract="The ExpressionSet",
+        url="www.zouhua.top",
+        other=list(notes="Created from text files"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  
+  return(expressionSet)
+}
+
+get_score <- function(dataset=get_ExprSet(x=phen, y=geneExp),
+                      geneset=pathways_hallmark_kegg,
+                      methods="ssgsea"){
+  # dataset=get_ExprSet(x=phen, y=geneExp)
+  # geneset=pathways_hallmark_kegg
+  # methods="ssgsea"  
+  
+  dat_fit <- gsva(expr = dataset, 
+              gset.idx.list = geneset,
+              method = methods, 
+              min.sz = 5, 
+              max.sz = 500,
+              kcdf = "Poisson")
+  res <- exprs(dat_fit) %>% t() %>% 
+    data.frame() %>%
+    rownames_to_column("SampleID")
+  
+  return(res)
+}
+
+### Differential methylation/copyNumber/methylation
+get_limma <- function(dataset=methylation_set,
+                      group_col=grp,
+                      tag="methylation",
+                      fc=1,
+                      pval=0.05){
+  
+  # dataset=methylation_set
+  # group_col=grp
+  # tag="methylation"  
+  # fc=1
+  # pval=0.05
+  
+  pheno <- pData(dataset) 
+  
+  if(tag == "methylation"){
+    # transform the beta value into M values via lumi package
+    require(lumi)
+    edata <- beta2m(exprs(dataset))    
+  }else{
+    edata <- exprs(dataset)
+  }
+
+  
+  require(limma)
+  design <- model.matrix(~0 + pheno$Cluster)
+  rownames(design) <- rownames(pheno)
+  colnames(design) <- group_col
+  exprSet <- edata  
+  
+  # show distribution
+  boxplot(exprSet)
+  plotDensities(exprSet) 
+  
+  # linear fitting 
+  fit <- lmFit(exprSet, design, method = 'ls')
+  contrast <- makeContrasts("S1-S2", levels = design) 
+  
+  # eBayes
+  fit2 <- contrasts.fit(fit, contrast)
+  fit2 <- eBayes(fit2)
+  
+  qqt(fit2$t, df = fit2$df.prior + fit2$df.residual, pch = 16, cex = 0.2)
+  abline(0, 1)  
+
+  # differential features
+  diff_feature <- topTable(fit2, number = Inf, adjust.method = 'BH') %>%
+    rownames_to_column("Feature") 
+  
+  # prof[rownames(prof)%in%"EVI2A", ] %>% data.frame() %>% setNames("EVI2A") %>%
+  #   rownames_to_column("SampleID") %>%
+  #   inner_join(pheno %>%rownames_to_column("SampleID"), by = "SampleID") -> a1
+  # wilcox.test(EVI2A~Cluster, data = a1)
+  # ggplot(a1, aes(x=Cluster, y=EVI2A))+geom_boxplot() 
+  
+  diff_feature[which(diff_feature$logFC >= fc & 
+                       diff_feature$adj.P.Val < pval), "Enrichment"] <- group_col[1]
+  diff_feature[which(diff_feature$logFC <= -fc & 
+                       diff_feature$adj.P.Val < pval), "Enrichment"] <- group_col[2]
+  diff_feature[which(abs(diff_feature$logFC) < fc |
+                       diff_feature$adj.P.Val >= pval), "Enrichment"] <- "Nonsignif"
+  
+  diff_res <- diff_feature %>% 
+    setNames(c("Feature", "log2FoldChange", "baseMean", "t", 
+               "pvalue", "padj", "B", "Enrichment")) %>% 
+    dplyr::select(Feature, everything()) %>%
+    arrange(padj, log2FoldChange) %>%
+    column_to_rownames("Feature")
+  
+  res <- list(fit=fit2, diff_res=diff_res)
+  
+  return(res)
+}
+```
+
+
+### gsva score
+```{r}
+kegg_gsva <- get_score(dataset=get_ExprSet(x=phen, y=geneExp),
+                       geneset=pathways_hallmark_kegg,
+                       methods="gsva")
+
+if(!dir.exists("../../Result/pathway/")){
+  dir.create("../../Result/pathway/", recursive = T)
+}
+write.csv(kegg_gsva, "../../Result/pathway/KEGG_gsva.csv", row.names = F)
+
+# Differential Test
+kegg_gsva_exprset <-  get_ExprSet(x=phen, y=kegg_gsva %>% column_to_rownames("SampleID") %>% t() %>% data.frame() %>%rownames_to_column("V1"))  
+Diff_gsva <- get_limma(dataset =kegg_gsva_exprset, tag = "gsva")
+DT::datatable(Diff_gsva$diff_res)
+```
+
+### ssgsea score
+```{r}
+kegg_ssgsea <- get_score(dataset=get_ExprSet(x=phen, y=geneExp),
+                       geneset=pathways_hallmark_kegg,
+                       methods="ssgsea")
+
+if(!dir.exists("../../Result/pathway/")){
+  dir.create("../../Result/pathway/", recursive = T)
+}
+write.csv(kegg_ssgsea, "../../Result/pathway/KEGG_ssgsea.csv", row.names = F)
+
+### Differential Test
+kegg_ssgsea_exprset <-  get_ExprSet(x=phen, y=kegg_ssgsea %>% 
+                                      column_to_rownames("SampleID") %>% 
+                                      t() %>% data.frame() %>%
+                                      rownames_to_column("V1"))  
+Diff_ssgsea <- get_limma(dataset =kegg_ssgsea_exprset, tag = "ssgsea")
+DT::datatable(Diff_ssgsea$diff_res)
+```
+
+### version
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [GSVA: gene set variation analysis for microarray and RNA-Seq data](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-14-7) 
+
+

@@ -1,0 +1,124 @@
+---
+title: "Metabolism and immune score relationship"
+date: "Created:2020-10-13"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+
+grp3 <- c("HF_early", "HF_late")
+grp3.col <- c("#6DC06A", "#2D6BB4")
+
+disease3 <- c("HF_early", "HF_early_sham", "HF_late", "HF_late_sham")
+disease3.col <- c("#ED1C24", "#9DCEDC", "#F89C31", "#B6B6BA")
+
+disease3_v2 <- c("Case", "Sham")
+disease3_v2.col <- c("#283891", "#ED1C24")
+
+pathway <- c("Carbohydrate_metabolism", "Lipid_metabolism", "Immune_system")
+pathway.col <- c("#6C326C", "#77A2D1", "#FFD169")
+```
+
+
+### load data 
+```{r}
+pathway_score <- read.csv("../../Result/Pathway/stringtie_hsa_filtered_TPM_ssgsea_3pathway.csv", row.names = 1)
+immune_score <- read.csv("../../Result/Immune_score/Stringtie_hsa_filtered_TPM_ImmuneScore.csv", row.names = 1)
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20201009.csv") 
+```
+
+
+### curate data 
+```{r}
+cor_plot <- function(tag="Glycolysis"){
+  
+  # tag <- "Glycolysis"
+  
+  phe <- phen %>% filter(Status=="Remained") %>% 
+          filter(!Group_v3%in%c("MI", "STZT1D")) %>%
+          mutate(Disease_v3=factor(Disease_v3, levels = disease3)) %>%
+          mutate(Type=ifelse((Disease_v3%in%grep("sham", Disease_v3, value = T)), "Sham", "TCase")) %>%
+          select(SampleID_v2, Group_v3, Type)
+  
+  mdat <- phe %>% inner_join(pathway_score %>% 
+                               rownames_to_column("SampleID_v2"), 
+                             by="SampleID_v2") %>%
+          tidyr::gather(key="pathway", value="PathwayScore", 
+                        -c("SampleID_v2", "Group_v3", "Type")) %>%
+          inner_join(immune_score %>% select(ImmuneScore) %>%
+                       rownames_to_column("SampleID_v2"), 
+                     by="SampleID_v2") %>%
+          mutate(Group=paste(Group_v3, Type, sep = "_"))
+  
+  xlab <- paste(tag, "activity score")
+  mdat_cln <- mdat %>% filter(pathway%in%tag) %>%
+              mutate(Group=factor(Group, levels = c("HF_early_TCase", "HF_late_TCase",
+                                                "HF_early_Sham", "HF_late_Sham")))
+  # mdat_GlucoseOxidation <- mdat %>% filter(pathway%in%"GlucoseOxidation")
+  # mdat_FattyAcidOxidation <- mdat %>% filter(pathway%in%"FattyAcidOxidation")
+  
+  dat_lab <- c()
+  fr <- levels(mdat_cln$Group)
+  for(i in 1:length(fr)){
+    #i <- 1 
+    mdat_cln_fr <- mdat_cln %>% filter(Group%in%fr[i])
+    fit <- lm(formula = ImmuneScore ~ PathwayScore, data = mdat_cln_fr)
+    lm.lst <- list(a = as.numeric(format(coef(fit)[1], digits = 4)),
+              b = as.numeric(format(coef(fit)[2], digits = 4)),
+              r2 = format(summary(fit)$r.squared, digits = 4),
+              p = format(summary(fit)$coefficients[2,4], digits = 4))
+    eq <- substitute(italic(y) == a + b %.% italic(x)~","~italic(R)^2~"="~r2~","~italic(P)~"="~p, lm.lst)
+    lab <- substitute(~italic(R)^2~"="~r2~","~italic(P)~"="~p, lm.lst)
+    
+    PScore <- with(mdat_cln_fr, (max(PathwayScore)-min(PathwayScore))/2+min(PathwayScore))
+    IScore <- with(mdat_cln_fr, max(ImmuneScore)-(max(ImmuneScore)-min(ImmuneScore))/8)
+    
+    temp <- data.frame(PathwayScore=PScore,
+                       ImmuneScore=IScore,
+                       Group=fr[i],
+                       label=as.character(as.expression(lab)))
+    dat_lab <- rbind(dat_lab, temp)
+  }
+  
+    
+  pl <- ggplot(mdat_cln, aes(x=PathwayScore, y=ImmuneScore))+ 
+    geom_point()+
+    stat_smooth(method='lm', formula = y~x, color="red")+
+    geom_text(data=dat_lab, aes(x=PathwayScore, y=ImmuneScore, label = label),
+                size = 4, parse = TRUE) +
+    labs(x=xlab)+
+    facet_wrap(~Group, scales = "free")+  
+    theme_bw()+
+    theme(axis.title = element_text(face = 'bold',color = 'black',size = 10),
+          axis.text.y = element_text(color = 'black',size = 8),
+          axis.text.x = element_text(color = 'black',size = 8),
+          strip.text = element_text(size = 10, face = "bold"))
+  
+  return(pl)  
+}
+```
+
+
+### plot
+```{r}
+Glycolysis_plot <- cor_plot(tag = "Glycolysis")
+GlucoseOxidation_plot <- cor_plot(tag = "GlucoseOxidation")
+FattyAcidOxidation_plot <- cor_plot(tag = "FattyAcidOxidation")
+
+require(patchwork)
+cbind_plot <- (Glycolysis_plot / GlucoseOxidation_plot / FattyAcidOxidation_plot) +
+  plot_layout(ncol = 1)
+ggsave("../../Result/Figures/Fig2_association.pdf", cbind_plot, width = 7, height = 11, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

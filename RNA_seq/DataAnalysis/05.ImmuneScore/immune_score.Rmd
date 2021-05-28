@@ -1,0 +1,103 @@
+---
+title: "Immue Score by estimate R package"
+date: "Created: 2021-01-25 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(estimate)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data 
+```{r}
+hsp.set <- readRDS("../../Result/Profile/final/Homo_sapiens_ExprSet_VoomSNM_symbol.RDS")
+mus.set <- readRDS("../../Result/Profile/final/Mus_musculus_ExprSet_VoomSNM_Hsymbol.RDS")
+
+mus.set.self <- readRDS("../../Result/Profile/final/Mus_musculus_ExprSet_VoomSNM_Hsymbol_self.RDS")
+mus.set.pub <- readRDS("../../Result/Profile/final/Mus_musculus_ExprSet_VoomSNM_Hsymbol_pub.RDS")
+```
+
+
+### Function
+
+Calculate the immune activity score of the whole tissue on bulk RNA-seq data via  estimate algorithm
+
+```{r}
+get_immnue <- function(dataset=mus.set.self,
+                       tag="hsp"){
+  
+  # dataset = mus.set.self
+  # tag = "mus_self"
+  
+  edata <- exprs(dataset)
+  
+  dir.name <- "../../Result/Immune_score/Score/"
+  if(!dir.exists(dir.name)){
+    dir.create(dir.name, recursive = T)
+  }
+  
+  
+  tsv.name <- paste0(dir.name, tag, ".tsv")
+  write.table(edata, file = tsv.name, quote = F, sep = "\t", row.names = T)
+
+  exprs_file <- tsv.name
+  filter.gct <- paste0(dir.name, tag, ".gct")
+  filterCommonGenes(input.f = exprs_file, output.f = filter.gct, id="GeneSymbol")
+  estimate.gct <- paste0(dir.name, tag, ".EstimateScore.gct")
+  estimateScore(filter.gct, estimate.gct, platform="illumina")
+  
+  immune_score <- CePa::read.gct(estimate.gct)
+  res <- immune_score %>% 
+    t() %>% data.frame() 
+  res.name <- paste0(dir.name, tag, "_ImmuneScore.csv")
+  write.csv(res, file = res.name)
+  
+}
+```
+
+
+### Human 
+```{r}
+get_immnue(dataset = hsp.set, tag="hsp")
+```
+
+
+### Mouse 
+```{r}
+get_immnue(dataset = mus.set, tag="mus_all")
+```
+
+
+### Mouse public 
+```{r}
+get_immnue(dataset = mus.set.pub, tag="mus_pub")
+```
+
+
+### Mouse self 
+```{r}
+get_immnue(dataset = mus.set.self, tag="mus_self")
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

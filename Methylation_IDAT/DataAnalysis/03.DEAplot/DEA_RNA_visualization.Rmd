@@ -1,0 +1,377 @@
+---
+title: "DEG: Distinct transcriptomic patterns between two tissues"
+date: "Created: 2021-05-07 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+### Introdution
+
+Distinct expression patterns between the following two comparisons in transcriptomics:
+
+1. **ParacancerousTissue** versus **PrimaryCancerTissue** (n=20, the paired participant);
+
+2. **PrimaryCancerTissue** versus **LiverMetastasis** (n=12, the paired participant).
+
+
+Comparative transcriptomic analysis using limma or DESeq2 R package in the paired model identified the differentially expressed genes(log2FC>1 and FDR<0.05) between **ParacancerousTissue** and **PrimaryCancerTissue** or between **PrimaryCancerTissue** and **LiverMetastasis**. 
+
+
+Epigenome would play an important role on gene expression. In the present study, we foster our interest in characterizing the epigentic regulations on the transcriptomc profiles of **ParacancerousTissue** and **PrimaryCancerTissue** or **PrimaryCancerTissue** and **LiverMetastasis**.  
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(convert)
+library(ggplot2)
+library(ggrepel)
+library(data.table)
+
+# rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+```
+
+
+### load data 
+```{r}
+phen <- read.csv("../../Result/phenotype/Pancreatic_tumor_merge_20210426.csv")
+
+# Differentailly Expressed Gene
+DEG_PPC <- fread("../../Result/Differential/Paracancerous_PrimaryCancer_limma_Gene.csv")
+DEG_PCL <- fread("../../Result/Differential/PrimaryCancer_Liver_limma_Gene.csv")
+
+# Profile 
+GeneSet_PPC <- readRDS("../../Result/profile/Paracancerous_PrimaryCancer_GeneExprSet.RDS")
+GeneSet_PCL <- readRDS("../../Result/profile/PrimaryCancer_Liver_GeneExprSet.RDS")
+```
+
+
+### Function
+```{r}
+volcanofun <- function(datset=DEG_PPC,
+                       genelist=c("CXCL12","LIFR","ITGB4","KRT16","ITGA3","SERPINB5","COL17A1","MST1R","LAMB3","TSPAN1"),
+                       group_name=c("ParacancerousTissue", "PrimaryCancerTissue"),
+                       group_col=c("#FF7F50", "#7CCD7C"),
+                       pval=0.05, 
+                       fc=1){
+  
+  # datset=DEG_PPC
+  # genelist=c("CXCL12","LIFR","ITGB4","KRT16","ITGA3","SERPINB5","COL17A1","MST1R","LAMB3","TSPAN1")
+  # group_name=c("ParacancerousTissue", "PrimaryCancerTissue")
+  # group_col=c("#FF7F50", "#7CCD7C")
+  # pval=0.01
+  # fc=1
+  
+  dat <- datset %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    mutate(color=factor(color, levels = c(group_name, "Nonsignif")))
+  # print(table(dat$color))
+  dat_status <- table(dat$color)
+  dat_status_number <- as.numeric(dat_status)
+  dat_status_name <- names(dat_status)
+  legend_label <- c(paste0(dat_status_name[1], " (", dat_status_number[1], ")"),
+                    paste0(dat_status_name[2], " (", dat_status_number[2], ")"),
+                    paste0("Nonsignif", " (", dat_status_number[3], ")"))
+  
+  dat.signif <- subset(dat, adj.P.Val < pval & abs(logFC) > fc) %>%
+    filter(GeneID%in%genelist)
+  
+  print(table(dat.signif$color))
+  
+  group_col_new <- c(group_col, "#000000")
+  group_name_new <- levels(dat$color)
+  
+  xlabel <- paste0("log2(FC) [", paste(group_name, collapse=":"), "]")
+  
+  # Make a basic ggplot2 object with x-y values
+  pl <- ggplot(dat, aes(x = logFC, y = -log10(adj.P.Val), color = color))+ 
+          geom_point(size = 0.8, alpha = 0.8)+
+          scale_color_manual(name = NULL,
+                             values = group_col_new,
+                             labels = c(legend_label, "Nonsignif"))+
+          xlab(xlabel) + 
+          ylab(expression(-log[10]("adjusted p-value")))+ 
+          geom_hline(yintercept=-log10(pval), alpha=.8, linetype=2, size=.7)+
+          geom_vline(xintercept=fc, alpha=.8, linetype=2, size=.7)+
+          geom_vline(xintercept=-fc, alpha=.8, linetype=2, size=.7)+ 
+          geom_text_repel(data = dat.signif,
+                          aes(label = GeneID),
+                          size = 4,
+                          max.overlaps = getOption("ggrepel.max.overlaps", default = 80),
+                          segment.linetype = 1,
+                          segment.curvature = -1e-20,
+                          box.padding = unit(0.35, "lines"),
+                          point.padding = unit(0.3, "lines"),
+                          arrow = arrow(length = unit(0.005, "npc")),
+                          color = "black",     # text color
+                          bg.color = "white", # shadow color
+                          bg.r = 0.15)+
+          annotate("text", x=min(dat$logFC), y=-log10(pval), label=pval, size=6, color="red")+
+          annotate("text", x=fc, y=0, label=fc, size=6, color="red")+
+          annotate("text", x=-fc, y=0, label=-fc, size=6, color="red")+
+          scale_y_continuous(trans = "log1p")+
+          guides(color=guide_legend(override.aes = list(size = 3)))+
+          theme_bw()+ 
+          theme(axis.title = element_text(color = "black", size = 12),
+                axis.text = element_text(color = "black", size = 10),
+                text = element_text(size = 8, color = "black", family="serif"),
+                panel.grid = element_blank(),
+                #legend.position = "right",
+                legend.position = c(.15, .1),
+                legend.key.height = unit(0.6,"cm"),
+                legend.text = element_text(face = "bold", color = "black", size = 8),
+                strip.text = element_text(face = "bold", size = 14))
+  return(pl)
+}
+
+paired_boxplot <- function(datset=GeneSet_PPC,
+        genelist=c("CXCL12","LIFR","ITGB4","KRT16","ITGA3","SERPINB5","COL17A1","MST1R","LAMB3","TSPAN1"),
+        group_name=c("ParacancerousTissue", "PrimaryCancerTissue"),
+        group_col=c("#FF7F50", "#7CCD7C")){
+
+  # datset=GeneSet_PPC
+  # genelist=c("CXCL12","LIFR","ITGB4","KRT16","ITGA3","SERPINB5","COL17A1","MST1R","LAMB3","TSPAN1")
+  # group_name=c("ParacancerousTissue", "PrimaryCancerTissue")
+  # group_col=c("#FF7F50", "#7CCD7C")
+  
+  pheno <- pData(datset)
+  pheno$Type <- factor(as.character(pheno$Type), levels = group_name)
+  pheno$PID <- factor(as.character(pheno$PID)) 
+  
+  edata <- data.frame(exprs(datset)) %>%
+    rownames_to_column("GeneID") %>%
+    filter(GeneID%in%genelist) %>%
+    column_to_rownames("GeneID")
+  
+  mdat <- pheno %>% dplyr::select(PID, Type) %>%
+    rownames_to_column("SampleID") %>%
+    inner_join(t(edata) %>% data.frame() %>% rownames_to_column("SampleID"), by = "SampleID") %>%
+    column_to_rownames("SampleID")
+  
+  plotdata <- mdat %>% tidyr::gather(key="geneID", value="value", -c("PID", "Type")) 
+  
+  # arrange by median of group per genes 
+  # plotdata_median_delta <- plotdata %>% group_by(Type, geneID) %>%
+  #   summarise(median_value=median(value)) %>%
+  #   ungroup() %>%
+  #   arrange(geneID, Type, median_value) %>%
+  #   group_by(geneID) %>%
+  #   summarise(delta=dplyr::first(median_value) - dplyr::last(median_value)) %>%
+  #   arrange(delta)
+  
+  print(unique(plotdata$PID))
+  
+  # plotdata$geneID <- factor(plotdata$geneID, levels = plotdata_median_delta$geneID)
+  plotdata$geneID <- factor(plotdata$geneID, levels = genelist)  
+  
+  pl <- ggplot(plotdata, aes(x = Type, y = value, fill= Type))+
+    stat_boxplot(geom = "errorbar", width = 0.15,
+                 position = position_dodge(0.4)) +    
+    geom_boxplot(width = 0.4, 
+                 outlier.colour = "black", 
+                 outlier.shape=21, outlier.size = 1)+
+    geom_line(aes(group=PID), linetype=2, size=.5)+
+    scale_fill_manual(values = group_col)+
+    scale_y_continuous(labels = scales::scientific)+
+    #facet_wrap(facets = "geneID", scales = "free", nrow = 2)+
+    facet_wrap(facets = "geneID", scales = "free_y", nrow = 2)+    
+    labs(x="", y="Gene Counts")+
+    guides(fill=F)+
+    theme_classic()+
+    theme(axis.title = element_text(color = "black", size = 12),
+          axis.text.x = element_text(color = "black", size = 10, angle = 30, hjust = .5, vjust = .5),
+          text = element_text(size = 8, color = "black", family="serif"),
+          panel.grid = element_blank(),
+          strip.text = element_text(face = "bold", size = 12))    
+    
+  return(pl)
+}
+```
+
+
+### **ParacancerousTissue** versus **PrimaryCancerTissue** (n=20, the paired participant)
+```{r, fig.width=8, fig.height=6}
+volcano_PPC <- volcanofun(datset=DEG_PPC,
+           genelist=c("CXCL12","LIFR","ITGB4","KRT16","ITGA3","SERPINB5","COL17A1","MST1R","LAMB3","TSPAN1"),
+           group_name=c("ParacancerousTissue", "PrimaryCancerTissue"))
+volcano_PPC
+if(!dir.exists("../../Result/Figure")){
+  dir.create("../../Result/Figure")
+}
+ggsave("../../Result/Figure/Paracancerous_PrimaryCancer_DEG_volcano.pdf", volcano_PPC, width = 8, height = 6)
+
+boxplot_PPC <- paired_boxplot(datset=GeneSet_PPC,
+        genelist=c("CXCL12","LIFR","ITGB4","KRT16","ITGA3","SERPINB5","COL17A1","MST1R","LAMB3","TSPAN1"),
+        group_name=c("ParacancerousTissue", "PrimaryCancerTissue"))
+boxplot_PPC
+if(!dir.exists("../../Result/Figure")){
+  dir.create("../../Result/Figure")
+}
+ggsave("../../Result/Figure/Paracancerous_PrimaryCancer_SpecificDEG_boxplot.pdf", boxplot_PPC, width = 8, height = 6)
+```
+
+### **PrimaryCancerTissue** versus **LiverMetastasis** (n=12, the paired participant)
+```{r}
+volcano_PCL <- volcanofun(datset=DEG_PCL,
+           genelist=c("APOB","FGB","FGA","FGG","ORM1","ITIH3","C9","HPX","SLC28A1","GFPT2"),
+           group_name=c("PrimaryCancerTissue", "LiverMetastasis"))
+volcano_PCL
+if(!dir.exists("../../Result/Figure")){
+  dir.create("../../Result/Figure")
+}
+ggsave("../../Result/Figure/PrimaryCancer_Liver_DEG_volcano.pdf", volcano_PCL, width = 8, height = 6)
+
+
+boxplot_PCL <- paired_boxplot(datset=GeneSet_PCL,
+        genelist=c("APOB","FGB","FGA","FGG","ORM1","ITIH3","C9","HPX","SLC28A1","GFPT2"),
+        group_name=c("PrimaryCancerTissue", "LiverMetastasis"))
+boxplot_PCL
+if(!dir.exists("../../Result/Figure")){
+  dir.create("../../Result/Figure")
+}
+ggsave("../../Result/Figure/PrimaryCancer_Liver_SpecificDEG_boxplot.pdf", boxplot_PCL, width = 8, height = 8)
+```
+
+### 5/11/2021: new gene condidates list
+
+#### **ParacancerousTissue** versus **PrimaryCancerTissue** (n=20, the paired participant)
+<details>
+<summary> lineage-specific gene markers </summary>
+
+
+The overlap of genes between DNA methylation and RNA sequence was identified as following:
+
+* **Enriched in but Hypomethylated ParacancerousTissue in TSS1500 & TSS200:**
+
+=======================================================================================
+
+|         |        |          |        |         |          |
+| ------- | ------ | -------- | ------ | ------- | -------- |
+| UGT1A10 | KRT16  | SERPINB5 | TNS4   | TFF1    | KRT6A    |
+| TRIM15  | CAPN9  | CGB8     | CTSE   | EPS8L3  | CAPN8    |
+| CDHR2   | KLK10  | LRRC31   | PI3    | HTR1D   | MIA      |
+| MSLN    | UGT1A6 | MMP13    | TRIM29 | ALDH3B2 | PPP1R14D |
+| CYP2C18 | KRT19  | LAMB3    | GSDMC  | CYP2W1  | TMEM171  |
+
+=======================================================================================
+
+
+* **Enriched in but Hypomethylated PrimaryCancerTissue  in TSS1500 & TSS200:**
+
+=======================================================================
+
+|         |        |        |          |         |        |
+| ------- | ------ | ------ | -------- | ------- | ------ |
+| CLPS    | CELA2A | CELA3B | PLA2G1B  | CELA3A  | CELA2B |
+| CTRB2   | LEP    | KLK1   | SERPINI2 | PEX5L   | PTF1A  |
+| MATN4   | FBXW12 | BRSK2  | ADAMTS19 | ZNF804B | VIPR2  |
+| CTRL    | CTRB1  | CIDEA  | CUZD1    | GPHA2   | ERP27  |
+| SLC7A10 | GDF10  | NPY5R  | LMO3     | CSMD3   | LHCGR  |
+
+=======================================================================
+
+</details>
+
+```{r}
+volcano_PPC <- volcanofun(datset=DEG_PPC,
+           genelist=c("UGT1A10","KRT16","SERPINB5","TNS4","TFF1","KRT6A","CAPN9","CDHR2","HTR1D","MMP13",
+                      "CLPS","CELA2A","GDF10","ERP27","LHCGR","CTRB2","LEP","KLK1","SERPINI2","PEX5L"),
+           group_name=c("ParacancerousTissue", "PrimaryCancerTissue"))
+volcano_PPC
+if(!dir.exists("../../Result/Figure")){
+  dir.create("../../Result/Figure")
+}
+ggsave("../../Result/Figure/Paracancerous_PrimaryCancer_DEG_volcano_v2.pdf", volcano_PPC, width = 8, height = 6)
+
+boxplot_PPC <- paired_boxplot(datset=GeneSet_PPC,
+        genelist=c("UGT1A10","KRT16","SERPINB5","TNS4","TFF1","KRT6A","CAPN9","CDHR2","HTR1D","MMP13",
+                      "CLPS","CELA2A","GDF10","ERP27","LHCGR","CTRB2","LEP","KLK1","SERPINI2","PEX5L"),
+        group_name=c("ParacancerousTissue", "PrimaryCancerTissue"))
+boxplot_PPC
+if(!dir.exists("../../Result/Figure")){
+  dir.create("../../Result/Figure")
+}
+ggsave("../../Result/Figure/Paracancerous_PrimaryCancer_SpecificDEG_boxplot_v2.pdf", boxplot_PPC, width = 8, height = 8)
+```
+
+
+#### **PrimaryCancerTissue** versus **LiverMetastasis** (n=12, the paired participant)
+
+<details>
+<summary> lineage-specific gene markers </summary>
+
+
+The overlap of genes between DNA methylation and RNA sequence was identified as following:
+
+* **Enriched in but Hypomethylated PrimaryCancerTissue in TSS1500 & TSS200:**
+
+=======================================================================================
+
+|          |         |        |           |         |         |
+| -------- | ------- | ------ | --------- | ------- | ------- |
+| MASP2    | FGA     | KNG1   | FABP1     | CFHR5   | HAO1    |
+| SERPIND1 | SLC10A1 | CYP8B1 | SERPINA10 | SULT2A1 | HP      |
+| AGXT2    | MBL2    | RTP3   | HPR       | INHBC   | PROZ    |
+| ITIH1    | APOA2   | APOH   | SERPINC1  | AHSG    | SLC17A2 |
+| AGXT     | ARG1    | GC     | CPN2      | UROC1   | ABCG5   |
+
+=======================================================================================
+
+
+* **Enriched in but Hypomethylated LiverMetastasis in TSS1500 & TSS200:**
+
+=======================================================================
+
+|        |         |         |          |        |         |
+| ------ | ------- | ------- | -------- | ------ | ------- |
+| DLX5   | LRRN4CL | SPARCL1 | DPT      | TRIL   | GLT8D2  |
+| CYS1   | LRRC17  | NFATC4  | CCND2    | CYBRD1 | PTK7    |
+| SNPH   | TNFSF4  | SHANK3  | SH2D3C   | LXN    | FAM78A  |
+| MEOX1  | MFAP4   | CD248   | CDC42EP5 | CD34   | PLTP    |
+| ZNF287 | TCF4    | EML1    | GBGT1    | HLX    | CCDC85B |
+
+=======================================================================
+
+</details>
+
+
+```{r}
+volcano_PCL <- volcanofun(datset=DEG_PCL,
+           genelist=c("MASP2","FGA","KNG1","FABP1","CFHR5","HAO1","SERPIND1","SLC10A1","CYP8B1","ARG1",
+                      "DLX5","LRRN4CL","SPARCL1","DPT","TRIL","GLT8D2","CYS1","CCND2","CD34","TCF4"),
+           group_name=c("PrimaryCancerTissue", "LiverMetastasis"))
+volcano_PCL
+if(!dir.exists("../../Result/Figure")){
+  dir.create("../../Result/Figure")
+}
+ggsave("../../Result/Figure/PrimaryCancer_Liver_DEG_volcano_v2.pdf", volcano_PCL, width = 8, height = 6)
+
+
+boxplot_PCL <- paired_boxplot(datset=GeneSet_PCL,
+        genelist=c("MASP2","FGA","KNG1","FABP1","CFHR5","HAO1","SERPIND1","SLC10A1","CYP8B1","ARG1",
+                      "DLX5","LRRN4CL","SPARCL1","DPT","TRIL","GLT8D2","CYS1","CCND2","CD34","TCF4"),
+        group_name=c("PrimaryCancerTissue", "LiverMetastasis"))
+boxplot_PCL
+if(!dir.exists("../../Result/Figure")){
+  dir.create("../../Result/Figure")
+}
+ggsave("../../Result/Figure/PrimaryCancer_Liver_SpecificDEG_boxplot_v2.pdf", boxplot_PCL, width = 8, height = 8)
+```
+
+
+### systemic information
+```{r}
+sessionInfo()
+```
+
+
+### Reference
+
+1. []()
+

@@ -1,0 +1,125 @@
+---
+title: "Acquiring the final gene express profile and phenotype"
+date: "Created: 2021-03-16 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+
+### Introduction 
+
+After removing the unsuitable samples including `SRR915775` and `SRR9331234`, we finally acquired the proper profile and phenotype in this study. The data will be used for further investigation in the following data analysis.
+
+1. rebuilding the new ExpressionSet Object
+
+2. reanalysing the Differential expression analysis 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(stringr)
+library(data.table)
+library(tibble)
+library(ggplot2)
+
+rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+```
+
+
+### load data
+```{r}
+hsp.set <- readRDS("../../Result/Profile/final/Homo_sapiens_ExprSet_VoomSNM_symbol.RDS")
+mus.set <- readRDS("../../Result/Profile/final/Mus_musculus_ExprSet_VoomSNM_Hsymbol.RDS")
+
+phen <- read.csv("../../Result/Phenotype/phenotype_final.csv") 
+```
+
+
+### The number of samples per group
+
+
+1. Human: the number of samples (n=225)
+
+  * NC: 69
+  
+  * DCM: 63
+  
+  * HCM: 8
+  
+  * ICM: 65
+  
+  * NICM: 20 
+  
+
+2. Mouse: the number of samples (n=85)
+  
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+    
+  * HF: 25
+
+
+### get profile 
+
+```{r}
+get_profile <- function(expers_set=hsp.set,
+                        metadata=phen){
+  
+  # expers_set=hsp.set
+  # metadata=phen
+  
+  
+  edata <- exprs(expers_set)
+  sid <- intersect(metadata$SampleID, colnames(edata))
+  
+  datphe <- metadata %>% filter(SampleID%in%sid) %>%
+      column_to_rownames("SampleID")
+  datprf <- edata %>% data.frame() %>% 
+      dplyr::select(rownames(datphe)) %>%
+      as.matrix()  
+  print(dim(datprf))
+  exprs <- datprf
+  adf <-  new("AnnotatedDataFrame", data=datphe)
+  experimentData <- new("MIAME",
+        name="ShuiLin Liao", lab="Dong gdl Lab",
+        contact="dong_ming@grmh-gdl.cn",
+        title="Heart-failure Experiment",
+        abstract="The gene ExpressionSet",
+        url="www.grmh-gdl.cn",
+        other=list(notes="Final Profile matrix"))
+  expressionSet <- new("ExpressionSet", exprs=exprs,
+                       phenoData=adf, 
+                       experimentData=experimentData)
+  
+  return(expressionSet)
+}
+
+
+hsp.set.new <- get_profile(expers_set=hsp.set, metadata=phen)
+mus.set.new <- get_profile(expers_set=mus.set, metadata=phen)
+```
+
+
+### output 
+```{r}
+if(!dir.exists("../../Result/Profile/final/")){
+  dir.create("../../Result/Profile/final/")
+}
+
+saveRDS(hsp.set.new, "../../Result/Profile/final/Homo_sapiens_ExprSet_VoomSNM_symbol_final.RDS", compress = TRUE)
+saveRDS(mus.set.new, "../../Result/Profile/final/Mus_musculus_ExprSet_VoomSNM_Hsymbol_final.RDS", compress = TRUE)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+

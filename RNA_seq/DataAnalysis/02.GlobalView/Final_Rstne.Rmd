@@ -1,0 +1,104 @@
+---
+title: "Rtsne all sample with time information"
+date: "Created: 2020-10-09 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(Rtsne)
+library(ggplot2)
+
+grp3 <- c("MI", "STZT1D", "HF_early", "HF_late")
+grp3.col <- c("#EE2B2B", "#BCD74B", "#6DC06A", "#2D6BB4")
+
+disease3 <- c("Case", "Sham")
+disease3.col <- c("#283891", "#ED1C24")
+```
+
+
+### load data 
+```{r}
+prof <- fread("../../Result/Profile/stringtie_filtered_TPM.tsv") %>%
+  column_to_rownames("V1")
+phen <- read.csv("../../Result/Phenotype/Heart_failure_phenotype_20201009.csv")
+```
+
+
+### Rstne function
+```{r}
+RtsneFun <- function(perpl=20){
+  
+  # perpl=20
+  
+  phe <- phen %>% filter(Status=="Remained") %>%
+    # filter(!Group_v3%in%c("MI", "STZT1D")) %>%
+    select(SampleID_v2, Group_v3, Disease_v3)
+  sid <- intersect(colnames(prof), as.character(phe$SampleID_v2))
+  phe.cln <- phe %>% filter(SampleID_v2%in%sid) %>%
+    mutate(Group_v3=factor(Group_v3),
+           Disease_v3=factor(Disease_v3))
+  
+  prf <- prof %>% dplyr::select(as.character(phe$SampleID_v2)) %>% 
+    rownames_to_column("Type") %>% 
+    filter(apply(dplyr::select(., -one_of("Type")), 1, 
+                 function(x){sum(x != 0)/length(x)}) > 0.2) %>%
+            data.frame(.) %>% 
+    column_to_rownames("Type")
+  
+  prf[!duplicated(prf), ]  %>% t() -> unduplicated_prf
+  # Rtsne 
+  #set.seed(123)
+  Rtsne <- Rtsne(unduplicated_prf, dims=2, perplexity=2, 
+                verbose=TRUE, max_iter=500, eta=200)
+  point <- Rtsne$Y %>% data.frame() %>% select(c(1:2))%>% 
+    setnames(c("tSNE1", "tSNE2"))
+  rownames(point) <- rownames(unduplicated_prf)
+  # principal component score of each sample
+  score <- inner_join(point%>%  rownames_to_column("SampleID_v2"), 
+                      phe.cln, by = "SampleID_v2") %>%
+    mutate(Type=ifelse((Disease_v3%in%grep("sham", Disease_v3, value = T)), "Sham", "Case")) %>%
+    mutate(Type=factor(Type, levels = disease3))
+
+  pl <- ggplot(score, aes(x=tSNE1, y=tSNE2))+
+              geom_point(aes(shape=Type, fill=Type), size=2.5)+
+              stat_ellipse(aes(color=Group_v3), size=1, linetype=1)+ 
+              scale_shape_manual(values = c(16, 17))+
+              scale_fill_manual(values = disease3.col)+          
+              scale_color_manual(values = grp3.col)+ 
+              guides(color=guide_legend(title = NULL,keywidth=.7,keyheight=.7),
+                     shape=guide_legend(title = NULL,keywidth=.7,keyheight=.7),
+                     fill=F)+
+              theme_classic()+
+              theme(axis.title = element_text(size=10, color="black", face="bold"),
+                     axis.text = element_text(size=9, color="black"),
+                     text = element_text(size=8, color="black"),
+                     strip.text = element_text(size=9, color="black", face="bold"), 
+                     panel.grid = element_blank(),
+                     legend.text=element_text(size=11, color = "black"),
+                     legend.position = c(0, 0),
+                     legend.justification = c(0, 0),
+                     legend.background = element_rect(color = "black", fill="white"))
+ 
+  return(pl)
+}
+```
+
+### All
+```{r}
+tsne_plot <- RtsneFun(perpl=20)
+tsne_plot
+#ggsave("../../Result/Figures/Fig1.tsne.pdf", tsne_plot, width = 6, height = 5, dpi = 600)
+#ggsave("../../Result/Figures/Fig1.tsne_v2.pdf", tsne_plot, width = 6, height = 5, dpi = 600)
+```
+
+
+### version
+```{r}
+sessionInfo()
+```

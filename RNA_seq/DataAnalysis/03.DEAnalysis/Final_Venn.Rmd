@@ -1,0 +1,224 @@
+---
+title: "Differential Gene Expression: Venn plot"
+date: "Created: 2021-03-22 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+## Introduction
+
+To illuminate the Differential Expressed Genes with parameters: |log2FC| > 1 and P.value < 0.05 among different groups, we used the following plots: **Venn plot** shows the DEGs' overlap among groups(numbers)
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(ggVennDiagram)
+
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data
+
+1. Human: the number of samples (n=197)
+
+  * NC:  69
+  
+  * DCM: 63
+  
+  * ICM: 65
+  
+  * HCM: 8
+  
+  * NICM: 20 
+
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+  
+  * HF: 25
+  
+```{r}
+hsp_DCM <- read.csv("../../Result/Differential/final/Hsp_DCM_NC_Diffgene.csv")
+hsp_ICM <- read.csv("../../Result/Differential/final/Hsp_ICM_NC_Diffgene.csv")
+
+mus_TAC <- read.csv("../../Result/Differential/final/Mus_TAC_NC_Diffgene.csv")
+mus_HF <- read.csv("../../Result/Differential/final/Mus_HF_NC_Diffgene.csv")
+```
+
+
+### Differential gene expression 
+
+* log2FoldChange: 1
+
+* Adjust Pvalue: 0.05
+
+
+```{r}
+vennfun <- function(datset1=hsp_DCM,
+                    datset2=hsp_ICM,
+                    group_name=c("DCM", "ICM"),
+                    group_col=c("#6C326C", "#77A2D1"),
+                    pval=0.05, 
+                    fc=1){
+  
+  # datset1=hsp_DCM
+  # datset2=hsp_ICM
+  # group_name=c("DCM", "ICM")
+  # group_col=c("#6C326C", "#77A2D1")
+  # pval=0.01
+  # fc=1
+  
+  dat1 <- datset1 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    mutate(color=factor(color, levels = c(group_name, "Nonsignif"))) %>%
+    filter(color != "Nonsignif")
+  
+  dat2 <- datset2 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    mutate(color=factor(color, levels = c(group_name, "Nonsignif"))) %>%
+    filter(color != "Nonsignif") 
+  
+  dat_signif_list <- list(A=dat1$GeneID,
+                          B=dat2$GeneID)
+  
+  pl <- ggVennDiagram(dat_signif_list, 
+                      label_alpha = 0,
+                      category.names = group_name)+
+  scale_fill_gradient(low="grey50",high = "yellow")
+  # scale_fill_gradient(low=group_col[1],high=group_col[2])
+  
+  return(pl)
+}
+
+
+vennfun2 <- function(datset1=hsp_DCM,
+                     datset2=hsp_ICM,
+                     datset3=mus_TAC,
+                     datset4=mus_HF,
+                     group_name=c("DCM", "ICM", "TAC", "HF"),
+                     pval=0.05, 
+                     fc=1){
+  
+  # datset1=hsp_DCM
+  # datset2=hsp_ICM
+  # datset3=mus_TAC
+  # datset4=mus_HF
+  # group_name=c("DCM", "ICM", "TAC", "HF")
+  # pval=0.01
+  # fc=1
+  
+  dat1 <- datset1 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    mutate(color=factor(color, levels = c(group_name, "Nonsignif"))) %>%
+    filter(color != "Nonsignif")
+  
+  dat2 <- datset2 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    mutate(color=factor(color, levels = c(group_name, "Nonsignif"))) %>%
+    filter(color != "Nonsignif")
+  
+  dat3 <- datset3 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    mutate(color=factor(color, levels = c(group_name, "Nonsignif"))) %>%
+    filter(color != "Nonsignif")
+  
+  dat4 <- datset4 %>% 
+    mutate(color = case_when(logFC > fc & adj.P.Val < pval ~ group_name[2],
+                             logFC < -fc & adj.P.Val < pval ~ group_name[1],
+                             adj.P.Val > pval | abs(logFC) < fc ~ "Nonsignif")) %>%
+    mutate(color=factor(color, levels = c(group_name, "Nonsignif"))) %>%
+    filter(color != "Nonsignif")  
+  
+  dat_signif_list <- list(A=dat1$GeneID,
+                          B=dat2$GeneID,
+                          C=dat3$GeneID,
+                          D=dat4$GeneID)
+  
+  pl <- ggVennDiagram(dat_signif_list, 
+                      label_alpha = 0,
+                      category.names = group_name)+
+  scale_fill_gradient(low = "grey50", high = "yellow")
+  
+  return(pl)
+}
+```
+
+
+### Human: DCM vs ICM 
+
+```{r, fig.width=4, fig.height=4}
+DCM_ICM_pl <- vennfun(datset1=hsp_DCM,
+                      datset2=hsp_ICM,
+                      group_name=hsp.grp[c(2, 4)],
+                      group_col=hsp.grp.col[c(2, 4)],
+                      pval=0.05, 
+                      fc=1)
+
+DCM_ICM_pl
+ggsave(filename = "../../Result/Figures/version_210322/SFig2E.pdf", DCM_ICM_pl, width = 4, height = 4)
+```
+
+### Mouse : TAC vs HF
+```{r, fig.width=4, fig.height=4}
+TAC_HF_pl <- vennfun(datset1=mus_TAC,
+                     datset2=mus_HF,
+                     group_name=mus.grp[c(2, 4)],
+                     group_col=mus.grp.col[c(2, 4)],
+                     pval=0.05, 
+                     fc=1)
+
+TAC_HF_pl
+ggsave(filename = "../../Result/Figures/version_210322/SFig2F.pdf", TAC_HF_pl, width = 4, height = 4)
+```
+
+### Human vs Mouse
+```{r}
+hsp_mus_pl <- vennfun2(datset1=hsp_DCM,
+                     datset2=hsp_ICM,
+                     datset3=mus_TAC,
+                     datset4=mus_HF,
+                     group_name=c("DCM", "ICM", "TAC", "HF"),
+                     pval=0.05, 
+                     fc=1)
+
+hsp_mus_pl
+ggsave(filename = "../../Result/Figures/version_210322/SFig3E.pdf", hsp_mus_pl, width = 4, height = 4)
+```
+
+
+### Systemic information
+```{r}
+sessionInfo()
+```
+
+
+### Reference 
+
+1. [R可视化：ggplot语法的Venn图](https://www.jianshu.com/p/bac9a4d02a2f)

@@ -1,0 +1,169 @@
+---
+title: "KEGG pathway: The heatmap of foldchange Pathway"
+date: "Created: 2021-03-24 Updated: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(ComplexHeatmap)
+
+# rm(list = ls())
+options(stringsAsFactors = F)
+options(future.globals.maxSize = 1000 * 1024^2)
+
+mus.grp <- c("TAC_NC", "TAC", "HF_NC", "HF")
+mus.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F")
+
+hsp.grp <- c("NC", "DCM", "HCM", "ICM", "NICM")
+hsp.grp.col <- c("#6C326C", "#77A2D1", "#FFD169", "#635F5F", "#D4D09A")
+```
+
+
+### load data
+
+1. Human: the number of samples (n=197)
+
+  * NC:  69
+  
+  * DCM: 63
+  
+  * ICM: 65
+
+2. Mouse: the number of samples (n=85)
+
+  * TAC_NC: 20 
+    
+  * TAC: 22 
+    
+  * HF_NC: 18
+  
+  * HF: 25
+  
+```{r}
+ssGSEA <- read.csv("../../Result/Pathway/final/hsp_mus_mergeKEGG_wilcox.csv")
+phen <- read.csv("../../Result/Phenotype/phenotype_final.csv")
+```
+
+
+### Function: heatmap
+```{r}
+heatmap_fun <- function(metadata=phen,
+                        dat_score=ssGSEA,
+                        group_name=c("NC", "DCM", "ICM", "TAC_NC", "TAC", "HF_NC", "HF"),
+                        pathway_level2=c("Carbohydrate metabolism", 
+                                        "Lipid metabolism",
+                                        "Energy metabolism", 
+                                        "Amino acid metabolism",
+                                        "Immune system")
+                        ){
+
+  
+  phe <- metadata %>% filter(Group %in% group_name) %>%
+    mutate(Group=factor(Group, levels = group_name)) %>%
+    arrange(Group) %>%
+    column_to_rownames("SampleID")
+  
+  pathway <- dat_score %>% dplyr::select(PathwayID,Pathway,Level1,Level2,ends_with("Pvalue")) %>%
+    mutate(Level2=factor(Level2, levels = as.character(pathway_level2)))
+  
+  score <- dat_score %>% dplyr::select(-all_of(c(ends_with("Pvalue")))) %>%
+    dplyr::select(-all_of(c("PathwayID","Level1","Level2"))) %>%
+    mutate(Pathway=factor(Pathway, levels = as.character(pathway$Pathway))) %>%
+    column_to_rownames("Pathway") %>%
+    dplyr::select(rownames(phe))
+
+ # scale data: z-score
+  scale_rows <- function (x) {
+      m = apply(x, 1, mean, na.rm = T)
+      s = apply(x, 1, sd, na.rm = T)
+      return((x - m)/s)
+  }  
+  score_scaled <- scale_rows(score) %>%
+    as.matrix()
+  require(circlize)
+  # col_fun <- colorRamp2(c(round(range(score_scaled)[1]), 0, 
+  #                         round(range(score_scaled)[2])),
+  #                       c("blue", "white", "red")) 
+  col_fun <- colorRamp2(c(-10, 0, 10),
+                        c("blue", "white", "red"))
+  
+  # col split 
+  dat_status <- table(phe$Group)
+  dat_status_number <- as.numeric(dat_status)
+  dat_status_name <- names(dat_status)
+  
+  col_split <- c()
+  for (i in 1:length(dat_status_number)) {
+    col_split <- c(col_split, rep(i, dat_status_number[i]))
+  }
+  
+  # row split 
+  dat_status_row <- table(pathway$Level2)
+  dat_status_number_row <- as.numeric(dat_status_row)
+  dat_status_name_row <- names(dat_status_row)
+  row_split <- c()
+  for (i in 1:length(dat_status_number_row)) {
+    row_split <- c(row_split, rep(i, dat_status_number_row[i]))
+  }  
+  
+  Heatmap(
+          score_scaled, 
+          col = col_fun,
+          cluster_rows = FALSE,
+          cluster_columns = FALSE,
+          column_order = rownames(phe),
+          row_order = pathway$Pathway,
+          show_column_names = FALSE,
+          show_row_names = TRUE,
+          row_names_gp = gpar(fontsize = 8),
+          row_names_side = "right",
+          row_dend_side = "left",
+          column_title = NULL, 
+          heatmap_legend_param = list(
+            title = "Pathway Abundance\nZscore",
+            title_position = "topcenter",
+            border = "black",
+            legend_height = unit(10, "cm"),
+            direction = "horizontal"),
+          column_split = col_split,
+          bottom_annotation  = HeatmapAnnotation(
+            foo = anno_block(gp = gpar(fill = 2:(length(group_name)+1)),
+                             labels = group_name, 
+                             labels_gp = gpar(col = "black", fontsize = 12))),
+          row_split = row_split,
+          left_annotation = rowAnnotation(
+            foo2 = anno_block(gp = gpar(fill = 2:(length(pathway_level2)+1)),
+                              labels = pathway_level2,
+                              labels_gp = gpar(col = "black", fontsize = 12)))
+          )
+}
+```
+
+
+### plot
+```{r, fig.width=10, fig.height=10}
+pdf("../../Result/Figures/version_210322/Fig2A.pdf", width = 12, height = 8)
+heatmap_fun(metadata=phen,
+            dat_score=ssGSEA,
+            group_name=c("NC", "DCM", "ICM", "TAC_NC", "TAC", "HF_NC", "HF"),
+            pathway_level2=c("Carbohydrate metabolism", 
+                             "Lipid metabolism",
+                             "Energy metabolism", 
+                             "Amino acid metabolism",
+                             "Immune system")
+            )
+dev.off()
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,144 @@
+---
+title: "metabolism and immune score"
+date: "Created: 2021-02-02; modified: `r Sys.Date()`"
+output: 
+  html_notebook:
+    codes: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+library(dplyr)
+library(tibble)
+library(data.table)
+library(GSVA)
+library(convert)
+
+options(future.globals.maxSize = 10000 * 1024^2)
+```
+
+
+### load data 
+```{r}
+gene_set_hsa_3pathway <- qusage::read.gmt("../../Result/GeneSetdb/metabolism_geneset_human/all.gmt")
+
+
+mdat.ind <- fread("../../Result/sc_profile/Average/average_normal.csv") %>%
+  column_to_rownames("V1")
+
+mdat.all <- fread("../../Result/sc_profile/Average/average_all_normal.csv") %>%
+  column_to_rownames("V1")
+rownames(mdat.all) <- NULL
+```
+
+
+### ssgsea function
+```{r}
+get_ssgsea <- function(express = mdat.ind,
+                       cell = "cardiomyocyte"){
+
+  # express=mdat.all  
+  # cell="All"  
+  
+  if(cell != "All"){
+    dat <- express %>% filter(CellType == cell) %>%
+      column_to_rownames("Individual") %>% 
+      dplyr::select(-CellType) %>%
+      t() %>% data.frame()    
+  }else{
+    dat <- express %>% 
+      column_to_rownames("Individual") %>%
+      t() %>% data.frame() 
+  }
+
+  
+  res <- gsva(as.matrix(dat), 
+               gene_set_hsa_3pathway,
+               method="ssgsea", 
+               min.sz=5, 
+               max.sz=500,
+               kcdf="Gaussian",
+               verbose=TRUE) %>%
+  data.frame() %>% t() %>% data.frame()
+  
+  return(res)
+}
+```
+
+### get metabolism
+```{r}
+# calculate
+ssgsea_cardiomyocyte <- get_ssgsea(express = mdat.ind, cell = "cardiomyocyte")
+ssgsea_endothelial<- get_ssgsea(express = mdat.ind, cell = "endothelial cells")
+ssgsea_fibroblast <- get_ssgsea(express = mdat.ind, cell = "fibroblast")
+ssgsea_smooth <- get_ssgsea(express = mdat.ind, cell = "smooth muscle cells")
+ssgsea_macrophage <- get_ssgsea(express = mdat.ind, cell = "macrophage")
+ssgsea_all <- get_ssgsea(express = mdat.all, cell = "All")
+
+# output
+write.csv(ssgsea_cardiomyocyte,
+          "../../Result/sc_profile/Average/ssgsea_cardiomyocyte_PathwayScore_normal.csv")
+write.csv(ssgsea_endothelial,
+          "../../Result/sc_profile/Average/ssgsea_endothelial_PathwayScore_normal.csv")
+write.csv(ssgsea_fibroblast,
+          "../../Result/sc_profile/Average/ssgsea_fibroblast_PathwayScore_normal.csv")
+write.csv(ssgsea_macrophage,
+          "../../Result/sc_profile/Average/ssgsea_macrophage_PathwayScore_normal.csv")
+write.csv(ssgsea_smooth,
+          "../../Result/sc_profile/Average/ssgsea_smooth_muscle_PathwayScore_normal.csv")
+write.csv(ssgsea_all,
+          "../../Result/sc_profile/Average/ssgsea_all_PathwayScore_normal.csv")
+```
+
+
+### immune score
+```{r}
+library(estimate)
+
+get_immnue <- function(express = mdat.ind,
+                       cell = "macrophage",
+                       tag = "macrophage"){
+  
+  # express = mdat.ind
+  # cell = "macrophage"
+  # tag = "macrophage"
+  
+  if(cell != "All"){
+    dat <- express %>% filter(CellType == cell) %>%
+      column_to_rownames("Individual") %>% 
+      dplyr::select(-CellType) %>%
+      t() %>% data.frame()    
+  }else{
+    dat <- express %>% 
+      column_to_rownames("Individual") %>%
+      t() %>% data.frame() 
+  }
+
+  
+  dir.name <- "../../Result/sc_profile/Average/"
+  tsv.name <- paste0(dir.name, tag, "_normal.tsv")
+  write.table(dat, file = tsv.name, quote = F, sep = "\t", row.names = T)
+
+  exprs_file <- tsv.name
+  filter.gct <- paste0(dir.name, tag, "_normal.gct")
+  filterCommonGenes(input.f = exprs_file, output.f = filter.gct, id="GeneSymbol")
+  estimate.gct <- paste0(dir.name, tag, "_normal.EstimateScore.gct")
+  estimateScore(filter.gct, estimate.gct, platform="illumina")
+  
+  immune_score <- CePa::read.gct(estimate.gct)
+  res <- immune_score %>% 
+    t() %>% data.frame() 
+  res.name <- paste0(dir.name, tag, "_normal_ImmuneScore.csv")
+  write.csv(res, file = res.name)
+  
+}
+
+get_immnue(cell = "macrophage", tag = "macrophage")
+get_immnue(express = mdat.all, cell = "All", tag = "All")
+```
+
+
+### version
+```{r}
+sessionInfo()
+```
