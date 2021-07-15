@@ -13,6 +13,7 @@ An effective, reproducible and  reliable data analysis workflow is based on the 
 * amplicon sequencing analysis
 * metagenomics sequencing analysis
 * bulk-RNA sequencing analysis
+* DNA methylation by Illumina Array 
 
 
 
