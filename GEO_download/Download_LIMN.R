@@ -9,6 +9,8 @@ option_list <- list(
         help="GEO number", metavar="character"),
   make_option(c("-p", "--GPL"), type="character",  
         help="GPL platform number", metavar="character"),
+  make_option(c("-t", "--type"), type="character",  
+              help="Type of GPL platform", metavar="character"),  
   make_option(c("-o", "--out"), type="character",  
         help="output", metavar="character")
 ); 
@@ -20,7 +22,9 @@ current_dir <- getwd()
 # input parameters
 GEO_name <- opt$GEO
 GPL_number <- opt$GPL
+Array_type <- opt$type
 dir <- opt$out
+
 
 # clinical and expression profile
 gset <- getGEO(GEO = GEO_name,
@@ -33,10 +37,18 @@ prof <- exprs(gset[[1]])
 # probe 2 geneid
 gpl <- getGEO(GEO = GPL_number, 
               destdir = dir)
-probe2gene <- Table(gpl) %>%
-  dplyr::select(ID, ILMN_Gene) %>%
-  filter(ILMN_Gene != "") %>%
-  setNames(c("ProbeID", "Gene"))
+if(Array_type == "ILMN"){
+  probe2gene <- Table(gpl) %>%
+    dplyr::select(ID, ILMN_Gene) %>%
+    filter(ILMN_Gene != "") %>%
+    setNames(c("ProbeID", "Gene"))  
+}else if(Array_type == "array"){
+  probe2gene <- Table(gpl) %>%
+    dplyr::select(all_of(c("ID", "Gene Symbol"))) %>%
+    setNames(c("ProbeID", "Gene")) %>%
+    filter(Gene != "") %>%
+    mutate(Gene=gsub(" /// \\S+", "", Gene))
+}
 
 
 # Creating Clinical Annotation Table
@@ -99,8 +111,8 @@ preprocess_profile <- function(dataset=prof,
   # metadata=phen_post
   # annotation=probe2gene
   
-  sid <- intersect(colnames(prof), metadata$Barcode)
-  prof_cln <- data.frame(prof) %>%
+  sid <- intersect(colnames(dataset), metadata$Barcode)
+  prof_cln <- data.frame(dataset) %>%
     dplyr::select(all_of(sid)) %>%
     rownames_to_column("ProbeID") %>%
     inner_join(annotation, by ="ProbeID")
@@ -182,10 +194,15 @@ phen_process <- paste0(outdir, GEO_name, "_clinical_post.csv")
 write.csv(phen, file = phen_origin, row.names = F)
 write.csv(phen_post, file = phen_process, row.names = F)
 
-prof_origin <- paste0(outdir, GEO_name, "_profile_origin.csv")
-prof_process <- paste0(outdir, GEO_name, "_profile_post.csv")
-write.table(prof, file = prof_origin, row.names = F, quote = F, sep = "\t")
-write.table(prof_post, file = prof_process, row.names = F, quote = F, sep = "\t")
+prof_origin <- paste0(outdir, GEO_name, "_profile_origin.tsv")
+prof_process <- paste0(outdir, GEO_name, "_profile_post.tsv")
+write.table(data.frame(prof) %>% rownames_to_column("GeneID"), 
+            file = prof_origin, row.names = F, quote = F, sep = "\t")
+write.table(prof_post %>% rownames_to_column("GeneID"), 
+            file = prof_process, row.names = F, quote = F, sep = "\t")
+
+probe2gene_name <- paste0(outdir, GPL_number, "_probe2gene_table.tsv")
+write.table(probe2gene, file = probe2gene_name, row.names = F, quote = F, sep = "\t")
 
 ExprSet_name <- paste0(outdir, GEO_name, "_GeneExprSet.RDS")
 saveRDS(ExprSet_object, file = ExprSet_name)
