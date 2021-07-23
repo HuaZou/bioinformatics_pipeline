@@ -31,14 +31,15 @@ Prefix <- opt$prefix
 Phenotype <- read.csv(Phenotype_para)
 Profile <- fread(Profile_para)
 
+
 ####################################################  
 #            phenotypic information                #
 #################################################### 
 get_ExprSet <- function(metadata=Phenotype,
                         profile=Profile){
   
-  # metadata=Phenotype
-  # profile=Profile
+  metadata=Phenotype
+  profile=Profile
   
   colnames(profile) <- substr(colnames(Profile), 1, 12)
   

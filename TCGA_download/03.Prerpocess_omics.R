@@ -12,7 +12,7 @@ option_list = list(
   make_option(c("-t", "--type"), type="character",  
         help="omic-data type", metavar="character"),
   make_option(c("-g", "--geneanno"), type="character", 
-              default = "/disk/user/zouhua/pipeline/TCGA_download/human_gene_all.tsv",  
+              default = "/disk/user/zouhua/pipeline/TCGA_download_v2/util/human_gene_all.tsv",  
               help="omic-data type", metavar="character"),  
   make_option(c("-p", "--prefix"), type="character", 
         help="prefix", metavar="character")
@@ -83,12 +83,6 @@ get_phenotype <- function(dataset=SumExperData){
   return(post_clinical)
   
 }
-phen <- get_phenotype(dataset=SumExperData)
-if(!dir.exists(paste0(current_dir, "/Clean/"))){
-  dir.create(paste0(current_dir, "/Clean/"))
-}
-phen_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_clinical.csv")
-write.csv(phen, phen_filename, row.names = F)
 
 ####################################################  
 #            phenotypic information                #
@@ -96,8 +90,8 @@ write.csv(phen, phen_filename, row.names = F)
 get_Omics <- function(dataset=SumExperData,
                       datatype=Type){
   
-  # dataset=SumExperData
-  # datatype=Type
+  dataset=SumExperData
+  datatype=Type
   
   profile <- assay(dataset) %>%
     data.frame()
@@ -123,16 +117,13 @@ get_Omics <- function(dataset=SumExperData,
       dplyr::select(-median) %>%
       column_to_rownames("external_gene_name")     
   }else if(datatype == "DNA_Methylation"){
-    prof_uniq <- profile 
+    prof_uniq <- profile %>% na.omit()
   }  
   
   res <- prof_uniq %>% 
     rownames_to_column("Feature")
   return(res)
 }
-prof <- get_Omics(dataset=SumExperData, datatype=Type)
-prof_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_profile.tsv")
-write.table(prof, prof_filename, row.names = F, quote = F, sep = "\t")
 
 ####################################################  
 #            phenotypic information                #
@@ -172,7 +163,131 @@ get_ExprSet <- function(metadata=phen,
   
 }
 
-ExprSet <- get_ExprSet(metadata=phen, profile=prof)
-ExprSet_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_ExprSet.RDS")
-saveRDS(ExprSet, ExprSet_filename, compress = TRUE)
-message("ExprSet object of Omics has been successfully transformed")
+####################################################  
+#             Copy number variation                #
+#################################################### 
+get_CNV <- function(dataset=SumExperData){
+  
+  # dataset=SumExperData
+  
+  hg_marker_file <- read.delim(GeneAnno)
+  
+  # If you are using Masked Copy Number Segment for GISTIC analysis, 
+  # please only keep probesets with freqcnv = FALSE
+  hg_marker_file_false <- hg_marker_file %>% 
+    filter(freqcnv == FALSE) %>%
+    dplyr::select(probeid, chr, pos)
+  tumor_seg <- dataset[substr(dataset$Sample, 14, 15) == "01", ]
+  untumor_seg <- dataset[substr(dataset$Sample, 14, 15) != "01", ]
+  
+  # put seg file and marker file into GISTIC software for further analysis
+  res <- list(hg=hg_marker_file_false,
+              tumor=tumor_seg,
+              untumor=untumor_seg)
+  return(res)
+}
+
+
+####################################################  
+#      extracting  miRNA  profile                  #
+####################################################
+get_miRNA <- function(dataset=SumExperData){
+  
+  # dataset=SumExperData
+  
+  # count 
+  count_name <- grep("read_count", colnames(dataset), value = T)
+  count_name_new <- gsub("-", "_", gsub("read_count_", "", count_name))
+  dat_count <- dataset %>%
+    dplyr::select(all_of(count_name))
+  rownames(dat_count) <- dataset$miRNA_ID
+  colnames(dat_count) <- count_name_new
+  dat_count_cln <- dat_count %>% rownames_to_column("Feature")
+  
+  # F/RPKM
+  Per_name <- grep("reads_per_million_miRNA_mapped_", colnames(dataset), value = T)
+  Per_name_new <- gsub("-", "_", gsub("reads_per_million_miRNA_mapped_", "", Per_name))
+  dat_per <- dataset %>%
+    dplyr::select(all_of(Per_name))
+  rownames(dat_per) <- dataset$miRNA_ID
+  colnames(dat_per) <- Per_name_new
+  dat_per_cln <- dat_per %>% rownames_to_column("Feature")
+  
+  # put seg file and marker file into GISTIC software for further analysis
+  res <- list(count=dat_count_cln,
+              FPKM=dat_per_cln)
+  return(res)
+}
+
+####################################################  
+#                     process                      #
+#################################################### 
+ if(!dir.exists(paste0(current_dir, "/Clean/"))){
+    dir.create(paste0(current_dir, "/Clean/"))
+  }
+# mRNA & Methylation
+if(Type %in%c("mRNA", "DNA_Methylation")){
+  phen <- get_phenotype(dataset=SumExperData)
+  phen_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_clinical.csv")
+  write.csv(phen, phen_filename, row.names = F)  
+
+  prof <- get_Omics(dataset=SumExperData, datatype=Type)
+  prof_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_profile.tsv")
+  write.table(prof, prof_filename, row.names = F, quote = F, sep = "\t")
+  
+  ExprSet <- get_ExprSet(metadata=phen, profile=prof)
+  ExprSet_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_ExprSet.RDS")
+  saveRDS(ExprSet, ExprSet_filename, compress = TRUE)
+
+  message("ExprSet object of Omics has been successfully transformed")
+}
+
+# CNV 
+if(Type == "CNV"){
+  CNV_list <- get_CNV(dataset=SumExperData)
+  marker_filename <- paste0(current_dir, "/Clean/", "snp6.na35.remap.hg38.tsv")
+  write.table(CNV_list$hg, marker_filename, row.names = F, quote = F, sep = "\t")
+  
+  tumor_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_tumor.tsv")
+  write.table(CNV_list$tumor, tumor_filename, row.names = F, quote = F, sep = "\t") 
+  
+  untumor_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_untumor.tsv")
+  write.table(CNV_list$untumor, untumor_filename, row.names = F, quote = F, sep = "\t")
+  
+  message("CNV has been successfully transformed")
+  
+}
+
+# miRNA
+if(Type == "miRNA"){
+  miRNA_list <- get_miRNA(dataset=SumExperData)
+
+  count_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_count.tsv")
+  write.table(miRNA_list$count, count_filename, row.names = F, quote = F, sep = "\t") 
+  
+  per_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_PKM.tsv")
+  write.table(miRNA_list$FPKM, per_filename, row.names = F, quote = F, sep = "\t")
+
+  message("miRNA has been successfully transformed")
+  
+}
+
+#  
+if(Type == "DNA_Methylation"){
+  phen <- get_phenotype(dataset=SumExperData)
+  if(!dir.exists(paste0(current_dir, "/Clean/"))){
+    dir.create(paste0(current_dir, "/Clean/"))
+  }
+  phen_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_clinical.csv")
+  write.csv(phen, phen_filename, row.names = F)  
+  
+  prof <- get_Omics(dataset=SumExperData, datatype=Type)
+  prof_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_profile.tsv")
+  write.table(prof, prof_filename, row.names = F, quote = F, sep = "\t")
+  
+  ExprSet <- get_ExprSet(metadata=phen, profile=prof)
+  ExprSet_filename <- paste0(current_dir, "/Clean/", Prefix, "_", Type, "_ExprSet.RDS")
+  saveRDS(ExprSet, ExprSet_filename, compress = TRUE)
+
+  message("ExprSet object of Omics has been successfully transformed")
+}
