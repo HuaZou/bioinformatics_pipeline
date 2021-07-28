@@ -90,8 +90,8 @@ get_phenotype <- function(dataset=SumExperData){
 get_Omics <- function(dataset=SumExperData,
                       datatype=Type){
   
-  dataset=SumExperData
-  datatype=Type
+  #dataset=SumExperData
+  #datatype=Type
   
   profile <- assay(dataset) %>%
     data.frame()
@@ -137,7 +137,9 @@ get_ExprSet <- function(metadata=phen,
   sid <- intersect(metadata$SampleID, colnames(prof))
   phen_cln <- metadata[metadata$SampleID%in%sid, ] %>%
     column_to_rownames("Barcode")
-  prof_cln <- prof %>% dplyr::select(phen_cln$SampleID) 
+  prof_cln <- prof %>% 
+    column_to_rownames("Feature") %>%
+    dplyr::select(phen_cln$SampleID) 
   
   if(!any(colnames(prof_cln) == phen_cln$SampleID)){
     stop("The order of samplenames between phen_cln and prof_cln was wrong")
