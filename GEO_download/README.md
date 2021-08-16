@@ -13,15 +13,13 @@ Luckily, the Package from R sovled this terrible situation. The following detail
 Firstly, loading GEOquery pacakges for using the getGEO function, and then the object including clinical information and expression profile would be generate. Morever, performing preprocess step on clinical and expression data would extract all the data we need for the subsequant analysis. Finally, transforming phenotype and profile into ExpressionSet object for further data analysis.
 
 
-
 ### Command line 
 
 The microarray seems have different regulations including *LIMN* and *array* on naming the probes. 
 
 ```bash
-Rscript Download_LIMN.R -g GSE65858 -p GPL10558 -t ILMN -o ./
-
-Rscript Download_Array.R -g GSE55457 -p GPL96 -t array -o ./
+Rscript Download_GEOData_v1.R -g GSE65858 -p GPL10558 -t ILMN -o ./
+Rscript Download_GEOData_v1.R -g GSE55457 -p GPL96 -t array -o ./
 ```
 
 ### Files' Structure
@@ -40,4 +38,13 @@ GSE55457
 │   ├── GSE55457_profile_origin.tsv
 │   └── GSE55457_profile_post.tsv
 └── work.sh
+```
+
+
+### Update 8/16/2021
+
+Since there is a R package, providing the relationship between probes and gene symbol, I updated the pipeline. The new version download script named Download_GEOData_v2.R is finished and the usage as following:
+
+```bash
+Rscript Download_GEOData_v2.R -g GSE55457 -p GPL96 -o ./
 ```

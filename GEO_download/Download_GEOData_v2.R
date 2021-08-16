@@ -2,15 +2,13 @@ library(GEOquery)
 library(tidyverse)
 library(stringr)
 library(optparse)
-
+library(idmap1)
 
 option_list <- list(
   make_option(c("-g", "--GEO"), type="character", default="GSE65858", 
         help="GEO number", metavar="character"),
   make_option(c("-p", "--GPL"), type="character",  
         help="GPL platform number", metavar="character"),
-  make_option(c("-t", "--type"), type="character",  
-              help="Type of GPL platform", metavar="character"),  
   make_option(c("-o", "--out"), type="character",  
         help="output", metavar="character")
 ); 
@@ -25,7 +23,6 @@ GPL_number <- opt$GPL
 Array_type <- opt$type
 dir <- opt$out
 
-
 # clinical and expression profile
 gset <- getGEO(GEO = GEO_name,
                destdir = dir,
@@ -35,21 +32,9 @@ phen <- pData(gset[[1]])
 prof <- exprs(gset[[1]])
 
 # probe 2 geneid
-gpl <- getGEO(GEO = GPL_number, 
-              destdir = dir)
-if(Array_type == "ILMN"){
-  probe2gene <- Table(gpl) %>%
-    dplyr::select(ID, ILMN_Gene) %>%
-    filter(ILMN_Gene != "") %>%
-    setNames(c("ProbeID", "Gene"))  
-}else if(Array_type == "array"){
-  probe2gene <- Table(gpl) %>%
-    dplyr::select(all_of(c("ID", "Gene Symbol"))) %>%
-    setNames(c("ProbeID", "Gene")) %>%
-    filter(Gene != "") %>%
-    mutate(Gene=gsub(" /// \\S+", "", Gene))
-}
-
+probe2gene <- getIDs(tolower(GPL_number)) %>%
+    dplyr::select(c("probe_id", "symbol")) %>%
+    setNames(c("ProbeID", "Gene"))
 
 # Creating Clinical Annotation Table
 preprocess_Clinical <- function(dataset = phen){
@@ -58,44 +43,10 @@ preprocess_Clinical <- function(dataset = phen){
   
   dat <- dataset[, c(1, grep(":ch1$", colnames(dataset)))]
   colnames(dat) <- gsub(":ch1$", "", colnames(dat))
-  
-  res <- dat  %>%
+  res <- dat %>%
     rownames_to_column("bcr_patient_barcode") %>%
-    dplyr::select(bcr_patient_barcode,
-                  ID,
-                  gender,
-                  age,
-                  os,
-                  os_event,
-                  pfs,
-                  pfs_event,
-                  smoking,
-                  alcohol,
-                  treatment,
-                  packyears,
-                  tumor_site,
-                  uicc_stage,
-                  t_category,
-                  n_category,
-                  distant_metastasis) %>%
     distinct(bcr_patient_barcode, .keep_all = TRUE) %>%
-    reshape::rename(c(bcr_patient_barcode = "Barcode",
-                      gender = "Gender",
-                      age = "Age",
-                      os_event = "OS",
-                      os  = "OS.Time",
-                      pfs_event = "PFS",
-                      pfs  = "PFS.Time",                      
-                      tumor_site = "Tissue_Origin",
-                      uicc_stage = "Stage",
-                      t_category     = "T",
-                      n_category     = "N")) %>%
-    mutate(OS=ifelse(OS == TRUE, 1, 0),
-           PFS=ifelse(PFS == TRUE, 1, 0))%>%
-    mutate(OS.Time = as.numeric(OS.Time) / 365,
-           PFS.Time = as.numeric(PFS.Time) / 365) %>%
-    mutate(Age=round(as.numeric(Age)),
-           Stage=gsub("A|B", "", Stage))
+    reshape::rename(c(bcr_patient_barcode = "Barcode"))  
   
   return(res)
 }
