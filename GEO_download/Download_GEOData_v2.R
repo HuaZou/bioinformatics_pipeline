@@ -2,13 +2,14 @@ library(GEOquery)
 library(tidyverse)
 library(stringr)
 library(optparse)
-library(idmap1)
 
 option_list <- list(
   make_option(c("-g", "--GEO"), type="character", default="GSE65858", 
         help="GEO number", metavar="character"),
   make_option(c("-p", "--GPL"), type="character",  
         help="GPL platform number", metavar="character"),
+  make_option(c("-t", "--type"), type="character",  
+              help="Type of GPL platform", metavar="character"),         
   make_option(c("-o", "--out"), type="character",  
         help="output", metavar="character")
 ); 
@@ -23,6 +24,7 @@ GPL_number <- opt$GPL
 Array_type <- opt$type
 dir <- opt$out
 
+
 # clinical and expression profile
 gset <- getGEO(GEO = GEO_name,
                destdir = dir,
@@ -32,9 +34,27 @@ phen <- pData(gset[[1]])
 prof <- exprs(gset[[1]])
 
 # probe 2 geneid
-probe2gene <- getIDs(tolower(GPL_number)) %>%
-    dplyr::select(c("probe_id", "symbol")) %>%
-    setNames(c("ProbeID", "Gene"))
+gpl <- getGEO(GEO = GPL_number, destdir = dir)
+
+
+if(Array_type == "ILMN"){
+  probe2gene <- Table(gpl) %>%
+    dplyr::select(ID, ILMN_Gene) %>%
+    filter(ILMN_Gene != "") %>%
+    setNames(c("ProbeID", "Gene"))  
+}else if(Array_type == "array"){
+  probe2gene <- Table(gpl) %>%
+    dplyr::select(all_of(c("ID", "Gene Symbol"))) %>%
+    setNames(c("ProbeID", "Gene")) %>%
+    filter(Gene != "") %>%
+    mutate(Gene=gsub(" /// \\S+", "", Gene))
+}else if(Array_type == "other"){
+  library(idmap1)
+  probe2gene <- getIDs(tolower(GPL_number)) %>%
+      dplyr::select(c("probe_id", "symbol")) %>%
+      setNames(c("ProbeID", "Gene"))  
+}
+
 
 # Creating Clinical Annotation Table
 preprocess_Clinical <- function(dataset = phen){

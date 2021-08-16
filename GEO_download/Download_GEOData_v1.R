@@ -26,12 +26,6 @@ Array_type <- opt$type
 dir <- opt$out
 
 
-# GEO_name <- "GSE55457"
-# GPL_number <- "GPL96"
-# Array_type <- "array"
-# dir <- "./"
-
-
 # clinical and expression profile
 gset <- getGEO(GEO = GEO_name,
                destdir = dir,
@@ -55,7 +49,6 @@ if(Array_type == "ILMN"){
     filter(Gene != "") %>%
     mutate(Gene=gsub(" /// \\S+", "", Gene))
 }
-
 
 # Creating Clinical Annotation Table
 preprocess_Clinical <- function(dataset = phen){

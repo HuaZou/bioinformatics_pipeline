@@ -43,8 +43,8 @@ GSE55457
 
 ### Update 8/16/2021
 
-Since there is a R package, providing the relationship between probes and gene symbol, I updated the pipeline. The new version download script named Download_GEOData_v2.R is finished and the usage as following:
+Since there is R package, providing the relationship between probes and gene symbol, I updated the pipeline. The new version download script named Download_GEOData_v2.R is finished and the usage as following:
 
 ```bash
-Rscript Download_GEOData_v2.R -g GSE55457 -p GPL96 -o ./
+Rscript Download_GEOData_v2.R GSE30552 -p GPL6246 -t other -o ./
 ```
