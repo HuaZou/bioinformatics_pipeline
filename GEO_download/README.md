@@ -1,4 +1,4 @@
-## Download Omic-data from GEO platform
+## Download transcriptomic data from GEO platform
 
 
 ### Introduction
