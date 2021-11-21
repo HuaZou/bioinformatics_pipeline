@@ -1,0 +1,5 @@
+SampleID	LaneID	Path
+TAC01	TAC01	/disk/user/zouhua/pipeline/dataset/01.miRNA_seq/RawData/TAC01.fq.gz
+TAC02	TAC02	/disk/user/zouhua/pipeline/dataset/01.miRNA_seq/RawData/TAC02.fq.gz
+TAC_NC09	TAC_NC09	/disk/user/zouhua/pipeline/dataset/01.miRNA_seq/RawData/TAC_NC09.fq.gz
+TAC_NC10	TAC_NC10	/disk/user/zouhua/pipeline/dataset/01.miRNA_seq/RawData/TAC_NC10.fq.gz
